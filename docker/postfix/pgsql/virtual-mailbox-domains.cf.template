@@ -1,0 +1,5 @@
+hosts = ${DB_HOST}:${DB_PORT}
+dbname = ${DB_DATABASE}
+user = ${DB_USERNAME}
+password = ${DB_PASSWORD}
+query = SELECT 1 FROM domains WHERE name='%s' AND is_active = true

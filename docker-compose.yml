@@ -1,0 +1,97 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    ports:
+      # The admin panel runs outside Docker (php-fpm/php artisan serve on the
+      # host) and connects here directly — bound to loopback only.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  postfix:
+    build:
+      context: ./docker/postfix
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dovecot:
+        condition: service_started
+      rspamd:
+        condition: service_started
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      APP_DOMAIN: ${APP_DOMAIN}
+      MAIL_DOMAIN: ${MAIL_DOMAIN}
+    ports:
+      - "25:25"
+      - "587:587"
+      - "465:465"
+    volumes:
+      - vmail:/var/mail/vhosts
+      # The host's own certbot (e.g. `certbot --nginx`) already manages this
+      # domain's certificate — read it directly instead of running a second,
+      # competing certbot. See README "TLS certificates".
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+
+  dovecot:
+    build:
+      context: ./docker/dovecot
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DOVECOT_MASTER_PASSWORD: ${DOVECOT_MASTER_PASSWORD}
+      APP_DOMAIN: ${APP_DOMAIN}
+    ports:
+      - "143:143"
+      - "993:993"
+    volumes:
+      - vmail:/var/mail/vhosts
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+
+  rspamd:
+    image: rspamd/rspamd:latest
+    restart: unless-stopped
+    depends_on:
+      - redis
+    volumes:
+      - ./docker/rspamd/local.d:/etc/rspamd/local.d:ro
+      # Bind mount (not a named volume): the admin panel runs on the host,
+      # not in Docker, and writes DKIM keys straight to this same path (see
+      # admin/.env.example DKIM_KEYS_PATH) — needs to be a real host path
+      # both sides can agree on.
+      - ./docker/data/dkim:/var/dkim:ro
+      - rspamd-data:/var/lib/rspamd
+
+volumes:
+  pgdata:
+  redis-data:
+  vmail:
+  rspamd-data:

@@ -1,0 +1,71 @@
+# Basic identity
+smtpd_banner = ${APP_DOMAIN} ESMTP
+biff = no
+append_dot_mydomain = no
+readme_directory = no
+compatibility_level = 3.6
+
+# Log straight to stdout instead of syslog (there is no syslogd in this container).
+maillog_file = /dev/stdout
+
+myhostname = ${APP_DOMAIN}
+mydomain = ${MAIL_DOMAIN}
+myorigin = $mydomain
+mydestination = localhost
+mynetworks = 127.0.0.0/8, [::1]/128
+inet_interfaces = all
+inet_protocols = ipv4
+
+# Virtual mailbox domains (PostgreSQL backed)
+virtual_mailbox_domains = pgsql:/etc/postfix/pgsql/virtual-mailbox-domains.cf
+virtual_alias_maps = pgsql:/etc/postfix/pgsql/virtual-alias-maps.cf
+virtual_mailbox_maps = pgsql:/etc/postfix/pgsql/virtual-mailbox-maps.cf
+virtual_mailbox_base = /var/mail/vhosts
+virtual_uid_maps = static:5000
+virtual_gid_maps = static:5000
+virtual_minimum_uid = 5000
+virtual_transport = lmtp:inet:dovecot:24
+
+# Message size / limits
+message_size_limit = 52428800
+mailbox_size_limit = 0
+
+# TLS — the host's own certbot (or, in dev, docker-compose.override.yml's
+# self-signed stand-in) manages this; see README "TLS certificates".
+smtpd_tls_cert_file = /etc/letsencrypt/live/${APP_DOMAIN}/fullchain.pem
+smtpd_tls_key_file = /etc/letsencrypt/live/${APP_DOMAIN}/privkey.pem
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+smtp_tls_security_level = may
+smtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+smtpd_tls_ciphers = high
+
+# SASL auth via Dovecot
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = inet:dovecot:12345
+smtpd_sasl_auth_enable = yes
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_local_domain =
+broken_sasl_auth_clients = yes
+
+# Recipient / relay restrictions
+smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination
+smtpd_recipient_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    reject_unauth_destination,
+    reject_unknown_recipient_domain,
+    reject_non_fqdn_recipient
+
+smtpd_helo_required = yes
+smtpd_sender_restrictions = reject_non_fqdn_sender, reject_unknown_sender_domain
+
+# Antispam: hand every message to rspamd via the milter protocol
+smtpd_milters = inet:rspamd:11332
+non_smtpd_milters = $smtpd_milters
+milter_default_action = accept
+milter_protocol = 6
+milter_mail_macros = i {mail_addr} {client_addr} {client_name} {auth_authen}
+
+alias_maps =
+alias_database =
