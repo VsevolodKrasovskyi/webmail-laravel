@@ -1,11 +1,11 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
-import { useForm } from '@inertiajs/vue3';
+import { Link, useForm } from '@inertiajs/vue3';
 import { toast } from 'vue-sonner';
 import {
     PenSquareIcon, RefreshCwIcon, LogOutIcon, ReplyIcon, Trash2Icon, FolderPlusIcon, FolderIcon,
     InboxIcon, SendIcon, ShieldAlertIcon, XIcon, SearchIcon, ChevronDownIcon, ChevronRightIcon, MailIcon,
-    EraserIcon,
+    EraserIcon, PaperclipIcon,
 } from '@lucide/vue';
 import AppLayout from '../Layouts/AppLayout.vue';
 import { fetchJson } from '../fetchJson';
@@ -13,7 +13,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
 import NativeSelect from '@/Components/NativeSelect.vue';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import {
@@ -86,6 +85,7 @@ function logout() {
 
 const DEFAULT_FOLDERS = [{ name: 'INBOX', label: 'Inbox', standard: true }];
 const folders = ref(DEFAULT_FOLDERS);
+const sidebarCollapsed = ref(false);
 const currentFolder = ref('INBOX');
 
 async function loadFolders() {
@@ -100,7 +100,6 @@ async function loadFolders() {
 function selectFolder(path) {
     currentFolder.value = path;
     thread.value = null;
-    threadAnchorUid.value = null;
     loadMessages();
 }
 
@@ -155,7 +154,6 @@ async function emptyCurrentFolder() {
         toast.success('Folder emptied');
         confirmingEmpty.value = false;
         thread.value = null;
-        threadAnchorUid.value = null;
         loadMessages();
     } catch (e) {
         toast.error(e.message);
@@ -184,7 +182,6 @@ async function dropOnFolder(targetPath) {
         toast.success('Message moved');
         if (thread.value?.some((m) => m.uid === uid)) {
             thread.value = null;
-            threadAnchorUid.value = null;
         }
         loadMessages();
     } catch (e) {
@@ -237,7 +234,6 @@ const threads = computed(() => {
 });
 
 const thread = ref(null);
-const threadAnchorUid = ref(null);
 const loadingThread = ref(false);
 const expandedUids = ref(new Set());
 
@@ -246,7 +242,6 @@ async function openThread(uid) {
     try {
         const data = await fetchJson(`/webmail/messages/${uid}?folder=${encodeURIComponent(currentFolder.value)}`);
         thread.value = data.messages;
-        threadAnchorUid.value = uid;
         expandedUids.value = new Set([thread.value.at(-1)?.uid]);
         for (const item of messages.value) {
             if (item.uid === uid) {
@@ -277,10 +272,16 @@ async function markUnread(uid, folder) {
             }
         }
         thread.value = null;
-        threadAnchorUid.value = null;
     } catch (e) {
         toast.error(e.message);
     }
+}
+
+function formatSize(bytes) {
+    if (! bytes) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function snippet(html) {
@@ -303,7 +304,6 @@ async function confirmDeleteMessage() {
         toast.success(folder === 'Trash' || folder === 'Junk' ? 'Message deleted' : 'Moved to Trash');
         if (thread.value?.some((m) => m.uid === target.uid)) {
             thread.value = null;
-            threadAnchorUid.value = null;
         }
         deleteTarget.value = null;
         loadMessages();
@@ -314,80 +314,12 @@ async function confirmDeleteMessage() {
     }
 }
 
-const composing = ref(false);
-const composeTo = ref('');
-const composeCcList = ref([]);
-const composeCcInput = ref('');
-const composeSubject = ref('');
-const composeBody = ref('');
-const composeInReplyTo = ref(null);
-const showCc = ref(false);
-const sending = ref(false);
-
-function addCc() {
-    const value = composeCcInput.value.trim().replace(/,$/, '');
-    if (value && ! composeCcList.value.includes(value)) {
-        composeCcList.value.push(value);
-    }
-    composeCcInput.value = '';
-}
-
-function removeCc(address) {
-    composeCcList.value = composeCcList.value.filter((a) => a !== address);
-}
-
-function startCompose() {
-    composing.value = true;
-    composeTo.value = '';
-    composeCcList.value = [];
-    composeCcInput.value = '';
-    composeSubject.value = '';
-    composeBody.value = '';
-    composeInReplyTo.value = null;
-    showCc.value = false;
-}
-
-function startReply() {
+function replyHref() {
     const last = thread.value?.at(-1);
     if (! last) {
-        return;
+        return '/webmail/compose';
     }
-    composing.value = true;
-    composeTo.value = extractEmail(last.from);
-    composeCcList.value = [];
-    composeCcInput.value = '';
-    composeSubject.value = last.subject.match(/^re:/i) ? last.subject : `Re: ${last.subject}`;
-    composeBody.value = `\n\nOn ${last.date}, ${last.from} wrote:\n> ${last.body.replace(/<[^>]+>/g, '').trim().replace(/\n/g, '\n> ')}`;
-    composeInReplyTo.value = last.message_id || null;
-    showCc.value = false;
-}
-
-async function send() {
-    sending.value = true;
-    try {
-        addCc();
-
-        await fetchJson('/webmail/send', {
-            method: 'POST',
-            body: {
-                to: composeTo.value,
-                cc: composeCcList.value,
-                subject: composeSubject.value,
-                body: composeBody.value,
-                in_reply_to: composeInReplyTo.value,
-            },
-        });
-        toast.success('Message sent');
-        composing.value = false;
-        loadMessages();
-        if (composeInReplyTo.value && threadAnchorUid.value) {
-            openThread(threadAnchorUid.value);
-        }
-    } catch (e) {
-        toast.error(e.message);
-    } finally {
-        sending.value = false;
-    }
+    return `/webmail/compose?quote_uid=${last.uid}&quote_folder=${encodeURIComponent(last.folder ?? currentFolder.value)}`;
 }
 
 onMounted(() => {
@@ -434,10 +366,12 @@ onMounted(() => {
                         <RefreshCwIcon class="size-4" />
                         Refresh
                     </Button>
-                    <Button size="sm" class="gap-2 rounded-full px-4" @click="startCompose">
-                        <PenSquareIcon class="size-4" />
-                        Compose
-                    </Button>
+                    <Link href="/webmail/compose">
+                        <Button size="sm" class="gap-2 rounded-full px-4">
+                            <PenSquareIcon class="size-4" />
+                            Compose
+                        </Button>
+                    </Link>
                     <Button variant="ghost" size="sm" @click="logout">
                         <LogOutIcon class="size-4" />
                         Sign out
@@ -445,8 +379,16 @@ onMounted(() => {
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 overflow-hidden rounded-2xl border bg-card lg:grid-cols-12 lg:divide-x">
-                <nav class="space-y-0.5 p-3 lg:col-span-2">
+            <div class="flex h-[75vh] min-h-[32rem] flex-col overflow-hidden rounded-2xl border bg-card lg:flex-row">
+                <nav class="flex shrink-0 flex-col space-y-0.5 border-b p-3 lg:w-56 lg:border-b-0 lg:border-r" :class="{ 'lg:w-14': sidebarCollapsed }">
+                    <button
+                        @click="sidebarCollapsed = ! sidebarCollapsed"
+                        class="mb-1 hidden items-center justify-center rounded-full p-2 text-muted-foreground transition hover:bg-accent lg:flex"
+                        :class="sidebarCollapsed ? 'self-center' : 'self-end'"
+                        :title="sidebarCollapsed ? 'Expand' : 'Collapse'"
+                    >
+                        <ChevronRightIcon class="size-4 transition-transform" :class="{ 'rotate-180': ! sidebarCollapsed }" />
+                    </button>
                     <div
                         v-for="folder in folders"
                         :key="folder.name"
@@ -457,14 +399,15 @@ onMounted(() => {
                     >
                         <button
                             @click="selectFolder(folder.name)"
+                            :title="folder.label"
                             class="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left text-sm"
                             :class="currentFolder === folder.name ? 'font-medium text-primary' : 'text-foreground/80'"
                         >
                             <component :is="folderIcon(folder.name)" class="size-4 shrink-0" />
-                            <span class="truncate">{{ folder.label }}</span>
+                            <span class="truncate" :class="{ 'lg:hidden': sidebarCollapsed }">{{ folder.label }}</span>
                         </button>
                         <button
-                            v-if="! folder.standard"
+                            v-if="! folder.standard && ! sidebarCollapsed"
                             @click="deleteFolderTarget = folder"
                             class="mr-1.5 shrink-0 rounded-full p-1 text-muted-foreground opacity-0 transition hover:bg-background group-hover/folder:opacity-100"
                             title="Delete folder"
@@ -474,14 +417,15 @@ onMounted(() => {
                     </div>
                     <button
                         @click="creatingFolder = true"
+                        title="New folder"
                         class="mt-1 flex w-full items-center gap-2.5 rounded-full px-3 py-2 text-left text-sm text-muted-foreground transition hover:bg-accent"
                     >
                         <FolderPlusIcon class="size-4 shrink-0" />
-                        New folder
+                        <span :class="{ 'lg:hidden': sidebarCollapsed }">New folder</span>
                     </button>
                 </nav>
 
-                <div class="lg:col-span-4">
+                <div class="flex min-h-0 shrink-0 flex-col border-b lg:w-96 lg:border-b-0 lg:border-r">
                     <div class="flex items-center gap-2 border-b p-3">
                         <div class="relative flex-1">
                             <SearchIcon class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -501,7 +445,7 @@ onMounted(() => {
                             <EraserIcon class="size-4 text-destructive" />
                         </Button>
                     </div>
-                    <div class="max-h-[34rem] divide-y overflow-y-auto" :class="{ 'opacity-50': loadingMessages }">
+                    <div class="min-h-0 flex-1 divide-y overflow-y-auto" :class="{ 'opacity-50': loadingMessages }">
                         <div
                             v-for="t in threads"
                             :key="t.key"
@@ -546,18 +490,20 @@ onMounted(() => {
                     </div>
                 </div>
 
-                <div class="lg:col-span-6">
+                <div class="flex min-h-0 flex-1 flex-col">
                     <p v-if="loadingThread" class="p-6 text-sm text-muted-foreground">Loading...</p>
                     <template v-else-if="thread">
-                        <div class="flex items-start justify-between gap-4 border-b p-4">
+                        <div class="flex shrink-0 items-start justify-between gap-4 border-b p-4">
                             <h3 class="text-lg font-semibold leading-snug">{{ thread.at(-1).subject }}</h3>
-                            <Button variant="outline" size="sm" class="shrink-0 gap-2 rounded-full" @click="startReply">
-                                <ReplyIcon class="size-4" />
-                                Reply
-                            </Button>
+                            <Link :href="replyHref()">
+                                <Button variant="outline" size="sm" class="shrink-0 gap-2 rounded-full">
+                                    <ReplyIcon class="size-4" />
+                                    Reply
+                                </Button>
+                            </Link>
                         </div>
 
-                        <div class="space-y-3 p-4">
+                        <div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
                             <div v-for="m in thread" :key="m.uid" class="overflow-hidden rounded-xl border">
                                 <button
                                     v-if="! expandedUids.has(m.uid)"
@@ -593,17 +539,22 @@ onMounted(() => {
                                             <Button variant="ghost" size="icon-sm" title="Mark as unread" @click="markUnread(m.uid, m.folder)">
                                                 <MailIcon class="size-4" />
                                             </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon-sm"
-                                                title="Delete"
-                                                @click="deleteTarget = { uid: m.uid, subject: m.subject, folder: m.folder }"
-                                            >
-                                                <Trash2Icon class="size-4 text-destructive" />
-                                            </Button>
                                         </div>
                                     </div>
-                                    <div class="bg-white p-4 text-sm text-neutral-900" v-html="m.body"></div>
+                                    <div class="min-h-[24rem] bg-white p-4 text-sm text-neutral-900" v-html="m.body"></div>
+                                    <div v-if="m.attachments?.length" class="flex flex-wrap gap-2 border-t bg-muted/30 p-3">
+                                        <a
+                                            v-for="a in m.attachments"
+                                            :key="a.id"
+                                            :href="`/webmail/messages/${m.uid}/attachments/${a.id}?folder=${encodeURIComponent(m.folder)}`"
+                                            target="_blank"
+                                            class="flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-xs transition hover:bg-accent"
+                                        >
+                                            <PaperclipIcon class="size-3.5 text-muted-foreground" />
+                                            {{ a.name }}
+                                            <span class="text-muted-foreground">({{ formatSize(a.size) }})</span>
+                                        </a>
+                                    </div>
                                 </template>
                             </div>
                         </div>
@@ -615,62 +566,6 @@ onMounted(() => {
                 </div>
             </div>
         </div>
-
-        <Dialog v-model:open="composing">
-            <DialogContent class="sm:max-w-xl">
-                <DialogHeader>
-                    <DialogTitle>{{ composeInReplyTo ? 'Reply' : 'New message' }}</DialogTitle>
-                </DialogHeader>
-                <form @submit.prevent="send" class="space-y-4">
-                    <div class="space-y-1.5">
-                        <div class="flex items-center justify-between">
-                            <Label for="compose-to">To</Label>
-                            <button
-                                v-if="! showCc"
-                                type="button"
-                                class="text-xs text-muted-foreground underline underline-offset-2"
-                                @click="showCc = true"
-                            >
-                                Add Cc
-                            </button>
-                        </div>
-                        <Input id="compose-to" v-model="composeTo" type="email" required />
-                    </div>
-                    <div v-if="showCc" class="space-y-1.5">
-                        <Label for="compose-cc">Cc</Label>
-                        <div class="flex flex-wrap items-center gap-1.5 rounded-md border border-input px-2 py-1.5">
-                            <Badge v-for="address in composeCcList" :key="address" variant="secondary" class="gap-1">
-                                {{ address }}
-                                <button type="button" @click="removeCc(address)">
-                                    <XIcon class="size-3" />
-                                </button>
-                            </Badge>
-                            <input
-                                id="compose-cc"
-                                v-model="composeCcInput"
-                                type="text"
-                                placeholder="email, then Enter"
-                                class="min-w-32 flex-1 bg-transparent text-sm outline-none"
-                                @keydown.enter.prevent="addCc"
-                                @keydown.,="addCc"
-                                @blur="addCc"
-                            />
-                        </div>
-                    </div>
-                    <div class="space-y-1.5">
-                        <Label for="compose-subject">Subject</Label>
-                        <Input id="compose-subject" v-model="composeSubject" type="text" required />
-                    </div>
-                    <div class="space-y-1.5">
-                        <Label for="compose-body">Message</Label>
-                        <Textarea id="compose-body" v-model="composeBody" rows="12" required />
-                    </div>
-                    <DialogFooter>
-                        <Button type="submit" :disabled="sending">{{ sending ? 'Sending...' : 'Send' }}</Button>
-                    </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
 
         <Dialog v-model:open="creatingFolder">
             <DialogContent>

@@ -80,6 +80,12 @@ class WebmailService
                 'body' => $m->hasHTMLBody() ? $m->getHTMLBody() : nl2br(e($m->getTextBody())),
                 'message_id' => (string) $m->message_id,
                 'seen' => $m->hasFlag('Seen'),
+                'attachments' => $m->getAttachments()->map(fn ($a) => [
+                    'id' => $a->id,
+                    'name' => $a->name ?: $a->filename ?: 'attachment',
+                    'size' => $a->size,
+                    'content_type' => $a->content_type,
+                ])->values()->all(),
             ])
             ->values()
             ->all();
@@ -87,6 +93,29 @@ class WebmailService
         $client->disconnect();
 
         return $result;
+    }
+
+    /**
+     * @return array{name:string, contentType:string, content:string}|null  $content is raw binary
+     */
+    public function getAttachment(string $email, string $password, int $uid, string $attachmentId, string $folderPath = 'INBOX', ?string $authUser = null): ?array
+    {
+        $client = $this->imapClient($email, $password, $authUser);
+        $client->connect();
+        $folder = $client->getFolder($folderPath);
+        $message = $folder->query()->getMessageByUid($uid);
+        $attachment = $message->getAttachments()->first(fn ($a) => $a->id === $attachmentId);
+        $client->disconnect();
+
+        if (! $attachment) {
+            return null;
+        }
+
+        return [
+            'name' => $attachment->name ?: $attachment->filename ?: 'attachment',
+            'contentType' => $attachment->content_type ?: 'application/octet-stream',
+            'content' => $attachment->content,
+        ];
     }
 
     /**
@@ -238,6 +267,7 @@ class WebmailService
 
     /**
      * @param  array<int, string>  $cc
+     * @param  array<int, array{name:string, contentType:string, content:string}>  $attachments  $content is base64-encoded
      */
     public function send(
         string $email,
@@ -248,6 +278,7 @@ class WebmailService
         array $cc = [],
         ?string $inReplyTo = null,
         ?string $authUser = null,
+        array $attachments = [],
     ): void {
         $transport = new EsmtpTransport(config('mail_server.smtp_host'), 465, true);
         $transport->setUsername($authUser ?? $email);
@@ -264,7 +295,8 @@ class WebmailService
             ->from($email)
             ->to($to)
             ->subject($subject)
-            ->text($body);
+            ->html($body)
+            ->text(trim(strip_tags(preg_replace('/<(br|\/p|\/div)\b[^>]*>/i', "\n", $body))));
 
         if (! empty($cc)) {
             $mime->cc(...$cc);
@@ -274,6 +306,10 @@ class WebmailService
             $mime->getHeaders()
                 ->addIdHeader('In-Reply-To', $inReplyTo)
                 ->addIdHeader('References', $inReplyTo);
+        }
+
+        foreach ($attachments as $attachment) {
+            $mime->attach(base64_decode($attachment['content']), $attachment['name'], $attachment['contentType']);
         }
 
         $transport->send($mime);

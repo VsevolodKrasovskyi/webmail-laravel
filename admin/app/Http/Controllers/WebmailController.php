@@ -26,6 +26,53 @@ class WebmailController extends Controller
         ]);
     }
 
+    public function compose(Request $request): Response|RedirectResponse
+    {
+        $credentials = $this->credentials($request);
+
+        if (! $credentials) {
+            return redirect('/webmail');
+        }
+
+        $to = (string) $request->query('to', '');
+        $subject = (string) $request->query('subject', '');
+        $body = '';
+        $inReplyTo = null;
+
+        $quoteUid = $request->query('quote_uid');
+        $quoteFolder = (string) $request->query('quote_folder', 'INBOX');
+
+        if ($quoteUid) {
+            try {
+                $thread = $this->webmail->getThread(
+                    $credentials['email'], $credentials['password'], (int) $quoteUid, $quoteFolder, $credentials['auth_user'] ?? null,
+                );
+                $last = end($thread);
+
+                if ($last) {
+                    $to = $this->extractEmailAddress($last['from']);
+                    $subject = preg_match('/^re:/i', $last['subject']) ? $last['subject'] : "Re: {$last['subject']}";
+                    $body = '<p></p><blockquote>On '.e($last['date']).', '.e($last['from']).' wrote:<br>'.$last['body'].'</blockquote>';
+                    $inReplyTo = $last['message_id'];
+                }
+            } catch (Throwable) {
+                // Fall back to a blank compose rather than blocking the page.
+            }
+        }
+
+        return Inertia::render('Webmail/Compose', [
+            'to' => $to,
+            'subject' => $subject,
+            'body' => $body,
+            'inReplyTo' => $inReplyTo,
+        ]);
+    }
+
+    private function extractEmailAddress(string $address): string
+    {
+        return preg_match('/<([^>]+)>/', $address, $m) ? $m[1] : $address;
+    }
+
     public function login(Request $request): RedirectResponse
     {
         $data = $request->validate([
@@ -123,6 +170,28 @@ class WebmailController extends Controller
         } catch (Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    public function downloadAttachment(Request $request, int $uid, string $attachmentId)
+    {
+        $credentials = $this->credentials($request);
+
+        if (! $credentials) {
+            abort(401);
+        }
+
+        $folder = $request->query('folder', 'INBOX');
+
+        $attachment = $this->webmail->getAttachment(
+            $credentials['email'], $credentials['password'], $uid, $attachmentId, $folder, $credentials['auth_user'] ?? null,
+        );
+
+        abort_if(! $attachment, 404);
+
+        return response($attachment['content'], 200, [
+            'Content-Type' => $attachment['contentType'],
+            'Content-Disposition' => 'attachment; filename="'.addslashes($attachment['name']).'"',
+        ]);
     }
 
     public function destroyMessage(Request $request, int $uid): JsonResponse
@@ -290,6 +359,10 @@ class WebmailController extends Controller
             'cc' => ['nullable', 'array'],
             'cc.*' => ['email'],
             'in_reply_to' => ['nullable', 'string', 'max:255'],
+            'attachments' => ['nullable', 'array', 'max:10'],
+            'attachments.*.name' => ['required', 'string', 'max:255'],
+            'attachments.*.contentType' => ['required', 'string', 'max:255'],
+            'attachments.*.content' => ['required', 'string'],
         ]);
 
         try {
@@ -302,6 +375,7 @@ class WebmailController extends Controller
                 $data['cc'] ?? [],
                 $data['in_reply_to'] ?? null,
                 $credentials['auth_user'] ?? null,
+                $data['attachments'] ?? [],
             );
 
             return response()->json(['ok' => true]);

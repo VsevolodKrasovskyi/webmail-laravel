@@ -36,6 +36,7 @@ Route::middleware('auth')->group(function () {
 
     Route::prefix('webmail')->group(function () {
         Route::get('/', [WebmailController::class, 'index'])->name('webmail');
+        Route::get('/compose', [WebmailController::class, 'compose'])->name('webmail.compose');
         Route::post('/login', [WebmailController::class, 'login'])->name('webmail.login');
         Route::post('/logout', [WebmailController::class, 'logout'])->name('webmail.logout');
         Route::get('/folders', [WebmailController::class, 'folders']);
@@ -44,6 +45,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/folders/empty', [WebmailController::class, 'emptyFolder']);
         Route::get('/messages', [WebmailController::class, 'messages']);
         Route::get('/messages/{uid}', [WebmailController::class, 'show']);
+        Route::get('/messages/{uid}/attachments/{attachmentId}', [WebmailController::class, 'downloadAttachment']);
         Route::post('/messages/{uid}/delete', [WebmailController::class, 'destroyMessage']);
         Route::post('/messages/{uid}/unread', [WebmailController::class, 'markUnread']);
         Route::post('/messages/{uid}/move', [WebmailController::class, 'moveMessage']);
