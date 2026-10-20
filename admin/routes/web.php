@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AliasController;
+use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\DashboardController;
@@ -23,6 +24,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
+
+    Route::get('/analytics', [AnalyticsController::class, 'index'])->name('analytics');
+    Route::get('/analytics/export/{type}', [AnalyticsController::class, 'export'])->name('analytics.export');
 
     Route::get('/settings', [SettingsController::class, 'edit'])->name('settings');
     Route::put('/settings/profile', [SettingsController::class, 'updateProfile'])->name('settings.profile');
@@ -50,5 +54,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/messages/{uid}/unread', [WebmailController::class, 'markUnread']);
         Route::post('/messages/{uid}/move', [WebmailController::class, 'moveMessage']);
         Route::post('/send', [WebmailController::class, 'send']);
+        Route::post('/drafts', [WebmailController::class, 'saveDraft']);
+        Route::post('/schedule', [WebmailController::class, 'schedule']);
     });
 });

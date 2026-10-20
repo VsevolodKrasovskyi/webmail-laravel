@@ -10,6 +10,7 @@ import {
     InboxIcon,
     LogOutIcon,
     SettingsIcon,
+    ChartColumnIcon,
 } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -27,6 +28,7 @@ const nav = [
     { href: '/mailboxes', label: 'Mailboxes', icon: MailIcon },
     { href: '/aliases', label: 'Aliases', icon: ArrowRightLeftIcon },
     { href: '/webmail', label: 'Webmail', icon: InboxIcon },
+    { href: '/analytics', label: 'Analytics', icon: ChartColumnIcon },
 ];
 
 watch(
@@ -64,11 +66,11 @@ function initials(email) {
         <Sonner position="top-right" rich-colors />
 
         <header class="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
-            <div class="flex h-14 items-center gap-6 px-6">
-                <span class="text-base font-semibold">Mail Admin</span>
+            <div class="flex h-14 items-center gap-3 px-3 sm:gap-6 sm:px-6">
+                <span class="hidden text-base font-semibold sm:inline">Mail Admin</span>
 
-                <nav class="flex flex-1 items-center gap-1">
-                    <Link v-for="item in nav" :key="item.href" :href="item.href">
+                <nav class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    <Link v-for="item in nav" :key="item.href" :href="item.href" class="shrink-0" :aria-label="item.label" :title="item.label">
                         <Button
                             variant="ghost"
                             size="sm"
@@ -76,7 +78,7 @@ function initials(email) {
                             :class="{ 'bg-accent text-accent-foreground': page.url.startsWith(item.href) }"
                         >
                             <component :is="item.icon" class="size-4" />
-                            {{ item.label }}
+                            <span class="hidden md:inline">{{ item.label }}</span>
                         </Button>
                     </Link>
                 </nav>
@@ -111,7 +113,7 @@ function initials(email) {
             </div>
         </header>
 
-        <main class="px-6 py-8">
+        <main class="px-3 py-5 sm:px-6 sm:py-8">
             <slot />
         </main>
     </div>

@@ -1,42 +1,141 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, watch, onBeforeUnmount } from 'vue';
 import { Link } from '@inertiajs/vue3';
 import { toast } from 'vue-sonner';
-import { ArrowLeftIcon, PaperclipIcon, XIcon, SendIcon } from '@lucide/vue';
+import { ArrowLeftIcon, PaperclipIcon, XIcon, SendIcon, SaveIcon, CalendarClockIcon } from '@lucide/vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import { fetchJson } from '../../fetchJson';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import RichTextEditor from '@/Components/RichTextEditor.vue';
+import RecipientInput from '@/components/RecipientInput.vue';
+import RichTextEditor from '@/components/RichTextEditor.vue';
 
 const props = defineProps({
     to: { type: String, default: '' },
     subject: { type: String, default: '' },
     body: { type: String, default: '' },
+    cc: { type: Array, default: () => [] },
+    bcc: { type: Array, default: () => [] },
     inReplyTo: { type: String, default: null },
+    draftId: { type: String, default: null },
+    canSchedule: { type: Boolean, default: false },
 });
 
 const to = ref(props.to);
-const ccList = ref([]);
-const ccInput = ref('');
-const showCc = ref(false);
+const ccList = ref([...props.cc]);
+const bccList = ref([...props.bcc]);
+const showCc = ref(props.cc.length > 0);
+const showBcc = ref(props.bcc.length > 0);
+const ccRef = ref(null);
+const bccRef = ref(null);
 const subject = ref(props.subject);
 const body = ref(props.body);
 const attachments = ref([]);
 const sending = ref(false);
+const draftId = ref(props.draftId);
+const savingDraft = ref(false);
+const draftSavedAt = ref(null);
+const scheduling = ref(false);
+const sendAt = ref('');
 
-function addCc() {
-    const value = ccInput.value.trim().replace(/,$/, '');
-    if (value && ! ccList.value.includes(value)) {
-        ccList.value.push(value);
-    }
-    ccInput.value = '';
+// `datetime-local` wants local time in this exact shape.
+function localInputValue(date) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function removeCc(address) {
-    ccList.value = ccList.value.filter((a) => a !== address);
+const minSendAt = () => localInputValue(new Date(Date.now() + 60_000));
+
+function openScheduler() {
+    if (! sendAt.value) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(9, 0, 0, 0);
+        sendAt.value = localInputValue(tomorrow);
+    }
+    scheduling.value = ! scheduling.value;
+}
+
+let lastSaved = JSON.stringify([props.to, props.subject, props.body, props.cc, props.bcc]);
+let autosaveTimer;
+
+function draftSnapshot() {
+    return JSON.stringify([to.value, subject.value, body.value, ccList.value, bccList.value]);
+}
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// To and Subject are required for every action: send, schedule and save draft.
+function validate({ silent = false } = {}) {
+    let message = null;
+    let field = null;
+
+    if (! EMAIL.test(to.value.trim())) {
+        message = to.value.trim() ? 'Enter a valid recipient address' : 'Recipient (To) is required';
+        field = 'compose-to';
+    } else if (! subject.value.trim()) {
+        message = 'Subject is required';
+        field = 'compose-subject';
+    }
+
+    if (message && ! silent) {
+        toast.error(message);
+        document.getElementById(field)?.focus();
+    }
+
+    return ! message;
+}
+
+async function saveDraft({ silent = false } = {}) {
+    if (savingDraft.value || sending.value) return;
+    if (! validate({ silent })) return;
+    const snapshot = draftSnapshot();
+    if (silent && snapshot === lastSaved) return;
+    savingDraft.value = true;
+    try {
+        const data = await fetchJson('/webmail/drafts', {
+            method: 'POST',
+            body: {
+                to: to.value,
+                cc: ccList.value,
+                bcc: bccList.value,
+                subject: subject.value,
+                body: body.value,
+                in_reply_to: props.inReplyTo,
+                draft_id: draftId.value,
+            },
+        });
+        draftId.value = data.draft_id;
+        lastSaved = snapshot;
+        draftSavedAt.value = new Date();
+        if (! silent) toast.success('Draft saved');
+    } catch (e) {
+        if (! silent) toast.error(e.message);
+    } finally {
+        savingDraft.value = false;
+    }
+}
+
+// Autosave a few seconds after the last edit, but only once there is something to keep.
+watch([to, subject, body, ccList, bccList], () => {
+    clearTimeout(autosaveTimer);
+    if (! validate({ silent: true })) return;
+    autosaveTimer = setTimeout(() => saveDraft({ silent: true }), 5000);
+}, { deep: true });
+
+onBeforeUnmount(() => clearTimeout(autosaveTimer));
+
+// Closing a recipient row also drops its addresses, so nothing hidden is ever sent.
+function closeCc() {
+    showCc.value = false;
+    ccList.value = [];
+}
+
+function closeBcc() {
+    showBcc.value = false;
+    bccList.value = [];
 }
 
 function fileToDataUrl(file) {
@@ -64,28 +163,50 @@ function formatSize(bytes) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-async function send() {
+async function buildPayload() {
+    ccRef.value?.commit();
+    bccRef.value?.commit();
+    clearTimeout(autosaveTimer);
+
+    const encodedAttachments = await Promise.all(attachments.value.map(async (a) => ({
+        name: a.name,
+        contentType: a.file.type || 'application/octet-stream',
+        content: (await fileToDataUrl(a.file)).split(',')[1],
+    })));
+
+    return {
+        to: to.value,
+        cc: ccList.value,
+        bcc: bccList.value,
+        subject: subject.value,
+        body: body.value,
+        in_reply_to: props.inReplyTo,
+        draft_id: draftId.value,
+        attachments: encodedAttachments,
+    };
+}
+
+async function schedule() {
+    if (! sendAt.value || ! validate()) return;
     sending.value = true;
     try {
-        addCc();
+        const payload = await buildPayload();
+        payload.send_at = new Date(sendAt.value).toISOString();
+        await fetchJson('/webmail/schedule', { method: 'POST', body: payload });
+        toast.success('Message scheduled');
+        window.location.href = '/webmail';
+    } catch (e) {
+        toast.error(e.message);
+    } finally {
+        sending.value = false;
+    }
+}
 
-        const encodedAttachments = await Promise.all(attachments.value.map(async (a) => ({
-            name: a.name,
-            contentType: a.file.type || 'application/octet-stream',
-            content: (await fileToDataUrl(a.file)).split(',')[1],
-        })));
-
-        await fetchJson('/webmail/send', {
-            method: 'POST',
-            body: {
-                to: to.value,
-                cc: ccList.value,
-                subject: subject.value,
-                body: body.value,
-                in_reply_to: props.inReplyTo,
-                attachments: encodedAttachments,
-            },
-        });
+async function send() {
+    if (! validate()) return;
+    sending.value = true;
+    try {
+        await fetchJson('/webmail/send', { method: 'POST', body: await buildPayload() });
         toast.success('Message sent');
         window.location.href = '/webmail';
     } catch (e) {
@@ -98,90 +219,132 @@ async function send() {
 
 <template>
     <AppLayout>
-        <div class="mb-6 flex items-center gap-3">
-            <Link href="/webmail" class="rounded-full p-2 text-muted-foreground transition hover:bg-accent">
-                <ArrowLeftIcon class="size-4" />
-            </Link>
-            <h2 class="text-xl font-semibold">{{ inReplyTo ? 'Reply' : 'New message' }}</h2>
-        </div>
+        <div class="mx-auto w-full max-w-3xl">
+            <div class="mb-4 flex items-center gap-3">
+                <Link href="/webmail" class="rounded-full p-2 text-muted-foreground transition hover:bg-accent" aria-label="Back to webmail">
+                    <ArrowLeftIcon class="size-4" />
+                </Link>
+                <h2 class="text-xl font-semibold tracking-tight">{{ inReplyTo ? 'Reply' : 'New message' }}</h2>
+                <p class="ml-auto text-xs text-muted-foreground">
+                    <template v-if="savingDraft">Saving...</template>
+                    <template v-else-if="draftSavedAt">Draft saved {{ draftSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</template>
+                </p>
+            </div>
 
-        <div class="mx-auto max-w-3xl space-y-4 rounded-2xl border bg-card p-6">
-            <div class="space-y-1.5">
-                <div class="flex items-center justify-between">
-                    <Label for="compose-to">To</Label>
-                    <button
-                        v-if="! showCc"
-                        type="button"
-                        class="text-xs text-muted-foreground underline underline-offset-2"
-                        @click="showCc = true"
-                    >
-                        Add Cc
+            <div class="overflow-hidden rounded-2xl border bg-card shadow-sm">
+                <div class="flex items-center gap-3 border-b px-4 py-1.5">
+                    <label for="compose-to" class="w-14 shrink-0 text-sm text-muted-foreground">To<span class="ml-0.5 text-destructive" aria-hidden="true">*</span></label>
+                    <input
+                        id="compose-to"
+                        v-model="to"
+                        type="email"
+                        required
+                        aria-required="true"
+                        autocapitalize="off"
+                        placeholder="name@example.com"
+                        class="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
+                    />
+                    <div class="flex shrink-0 gap-1 text-xs">
+                        <button
+                            v-if="! showCc"
+                            type="button"
+                            class="rounded-full px-2.5 py-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                            @click="showCc = true"
+                        >Cc</button>
+                        <button
+                            v-if="! showBcc"
+                            type="button"
+                            class="rounded-full px-2.5 py-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                            @click="showBcc = true"
+                        >Bcc</button>
+                    </div>
+                </div>
+
+                <div v-if="showCc" class="flex items-start gap-3 border-b px-4 py-1.5">
+                    <label for="compose-cc" class="w-14 shrink-0 py-2 text-sm text-muted-foreground">Cc</label>
+                    <RecipientInput id="compose-cc" ref="ccRef" v-model="ccList" placeholder="Add Cc recipients" class="py-1" />
+                    <button type="button" class="mt-1.5 shrink-0 rounded-full p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground" title="Remove Cc" aria-label="Remove Cc" @click="closeCc">
+                        <XIcon class="size-4" />
                     </button>
                 </div>
-                <Input id="compose-to" v-model="to" type="email" required />
-            </div>
 
-            <div v-if="showCc" class="space-y-1.5">
-                <Label for="compose-cc">Cc</Label>
-                <div class="flex flex-wrap items-center gap-1.5 rounded-md border border-input px-2 py-1.5">
-                    <Badge v-for="address in ccList" :key="address" variant="secondary" class="gap-1">
-                        {{ address }}
-                        <button type="button" @click="removeCc(address)">
-                            <XIcon class="size-3" />
-                        </button>
-                    </Badge>
+                <div v-if="showBcc" class="flex items-start gap-3 border-b px-4 py-1.5">
+                    <label for="compose-bcc" class="w-14 shrink-0 py-2 text-sm text-muted-foreground">Bcc</label>
+                    <RecipientInput id="compose-bcc" ref="bccRef" v-model="bccList" placeholder="Hidden recipients" class="py-1" />
+                    <button type="button" class="mt-1.5 shrink-0 rounded-full p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground" title="Remove Bcc" aria-label="Remove Bcc" @click="closeBcc">
+                        <XIcon class="size-4" />
+                    </button>
+                </div>
+
+                <div class="flex items-center gap-3 border-b px-4 py-1.5">
+                    <label for="compose-subject" class="w-14 shrink-0 text-sm text-muted-foreground">Subject<span class="ml-0.5 text-destructive" aria-hidden="true">*</span></label>
                     <input
-                        id="compose-cc"
-                        v-model="ccInput"
+                        id="compose-subject"
+                        v-model="subject"
                         type="text"
-                        placeholder="email, then Enter"
-                        class="min-w-32 flex-1 bg-transparent text-sm outline-none"
-                        @keydown.enter.prevent="addCc"
-                        @keydown.,="addCc"
-                        @blur="addCc"
+                        required
+                        class="min-w-0 flex-1 bg-transparent py-2 text-sm font-medium outline-none"
                     />
                 </div>
-            </div>
 
-            <div class="space-y-1.5">
-                <Label for="compose-subject">Subject</Label>
-                <Input id="compose-subject" v-model="subject" type="text" required />
-            </div>
+                <div class="space-y-3 p-3 sm:p-4">
+                    <RichTextEditor v-model="body" />
 
-            <div class="space-y-1.5">
-                <div class="flex items-center justify-between">
-                    <Label>Message</Label>
-                    <label class="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
-                        <PaperclipIcon class="size-3.5" />
-                        Attach files
-                        <input
-                            type="file"
-                            multiple
-                            class="hidden"
-                            @change="(e) => { addAttachments(Array.from(e.target.files ?? [])); e.target.value = ''; }"
-                        />
-                    </label>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <label class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground">
+                            <PaperclipIcon class="size-3.5" />
+                            Attach files
+                            <input
+                                type="file"
+                                multiple
+                                class="hidden"
+                                @change="(e) => { addAttachments(Array.from(e.target.files ?? [])); e.target.value = ''; }"
+                            />
+                        </label>
+                        <Badge v-for="(a, index) in attachments" :key="index" variant="secondary" class="max-w-full gap-1.5 py-1.5">
+                            <span class="truncate">{{ a.name }}</span>
+                            <span class="shrink-0 text-muted-foreground">({{ formatSize(a.size) }})</span>
+                            <button type="button" class="shrink-0" @click="removeAttachment(index)">
+                                <XIcon class="size-3" />
+                            </button>
+                        </Badge>
+                    </div>
+
+                    <div v-if="scheduling" class="flex flex-wrap items-end gap-3 rounded-xl border bg-muted/30 p-3">
+                        <div class="w-full space-y-1.5 sm:w-auto">
+                            <Label for="compose-send-at">Send at</Label>
+                            <Input id="compose-send-at" v-model="sendAt" type="datetime-local" :min="minSendAt()" class="w-full sm:w-56" />
+                        </div>
+                        <Button :disabled="sending || ! sendAt" class="w-full gap-2 sm:w-auto" @click="schedule">
+                            <CalendarClockIcon class="size-4" />
+                            {{ sending ? 'Scheduling...' : 'Schedule send' }}
+                        </Button>
+                        <p class="basis-full text-xs text-muted-foreground">Sent from your mailbox by the server at that time (your local time zone).</p>
+                    </div>
                 </div>
-                <RichTextEditor v-model="body" />
-                <div v-if="attachments.length" class="flex flex-wrap gap-2 pt-1">
-                    <Badge v-for="(a, index) in attachments" :key="index" variant="secondary" class="gap-1.5 py-1.5">
-                        {{ a.name }}
-                        <span class="text-muted-foreground">({{ formatSize(a.size) }})</span>
-                        <button type="button" @click="removeAttachment(index)">
-                            <XIcon class="size-3" />
-                        </button>
-                    </Badge>
-                </div>
-            </div>
 
-            <div class="flex justify-end gap-2 border-t pt-4">
-                <Link href="/webmail">
-                    <Button variant="ghost">Cancel</Button>
-                </Link>
-                <Button :disabled="sending" class="gap-2" @click="send">
-                    <SendIcon class="size-4" />
-                    {{ sending ? 'Sending...' : 'Send' }}
-                </Button>
+                <div class="flex items-center justify-between gap-2 border-t bg-muted/20 px-3 py-3 sm:px-4">
+                    <Button :disabled="sending" class="gap-2 rounded-full px-5" @click="send">
+                        <SendIcon class="size-4" />
+                        {{ sending ? 'Sending...' : 'Send' }}
+                    </Button>
+                    <div class="flex items-center gap-1">
+                        <Button v-if="canSchedule" variant="ghost" size="sm" :disabled="sending" class="gap-2" title="Send later" @click="validate() && openScheduler()">
+                            <CalendarClockIcon class="size-4" />
+                            <span class="hidden sm:inline">Send later</span>
+                        </Button>
+                        <Button variant="ghost" size="sm" :disabled="savingDraft || sending" class="gap-2" title="Save draft" @click="saveDraft()">
+                            <SaveIcon class="size-4" />
+                            <span class="hidden sm:inline">Save draft</span>
+                        </Button>
+                        <Link href="/webmail">
+                            <Button variant="ghost" size="sm" title="Close">
+                                <XIcon class="size-4" />
+                                <span class="hidden sm:inline">Close</span>
+                            </Button>
+                        </Link>
+                    </div>
+                </div>
             </div>
         </div>
     </AppLayout>

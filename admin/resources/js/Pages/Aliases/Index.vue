@@ -8,9 +8,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import Pagination from '@/Components/Pagination.vue';
-import SortableHeader from '@/Components/SortableHeader.vue';
-import NativeSelect from '@/Components/NativeSelect.vue';
+import Pagination from '@/components/Pagination.vue';
+import SortableHeader from '@/components/SortableHeader.vue';
+import NativeSelect from '@/components/NativeSelect.vue';
 import {
     Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -94,7 +94,7 @@ function confirmDelete() {
 
 <template>
     <AppLayout>
-        <div class="mb-6 flex items-center justify-between">
+        <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-xl font-semibold">Aliases</h2>
             <Dialog v-model:open="createOpen">
                 <Button @click="createOpen = true">
@@ -125,7 +125,7 @@ function confirmDelete() {
         </div>
 
         <div class="mb-4 flex items-center gap-3">
-            <Input v-model="query.search" placeholder="Search aliases..." class="max-w-xs" />
+            <Input v-model="query.search" placeholder="Search aliases..." class="w-full sm:max-w-xs" />
             <select
                 v-model="query.status"
                 class="h-9 rounded-md border border-input bg-transparent px-3 text-sm"

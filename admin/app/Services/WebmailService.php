@@ -15,7 +15,20 @@ class WebmailService
      * ones that actually exist are returned by listFolders() — the rest get
      * created lazily (Sent on send, Trash on delete) rather than up front.
      */
-    private const STANDARD_FOLDERS = ['INBOX', 'Sent', 'Junk', 'Trash'];
+    private const STANDARD_FOLDERS = ['INBOX', 'Drafts', 'Sent', 'Junk', 'Trash'];
+
+    /** Virtual folder: every message except Junk and Trash, like Gmail's "All Mail". */
+    public const ALL_MAIL = '__ALL__';
+
+    /** Virtual folder backed by the scheduled_emails table, not IMAP. */
+    public const SCHEDULED = '__SCHEDULED__';
+
+    /** Left out of "All mail". */
+    private const EXCLUDED_FROM_ALL = ['Junk', 'Trash'];
+
+    private const MAX_INLINE_IMAGE_BYTES = 3 * 1024 * 1024;
+
+    private const MAX_INLINE_TOTAL_BYTES = 8 * 1024 * 1024;
 
     public function testLogin(string $email, string $password, ?string $authUser = null): void
     {
@@ -25,35 +38,60 @@ class WebmailService
     }
 
     /**
-     * @return array<int, array{uid:int, subject:string, from:string, date:?string, seen:bool, thread_key:string}>
+     * @return array<int, array{uid:int, folder:string, subject:string, from:string, to:string, date:?string, timestamp:int, seen:bool, thread_key:string}>
      */
     public function listMessages(string $email, string $password, string $folderPath = 'INBOX', int $limit = 50, ?string $authUser = null, ?string $search = null): array
     {
         $client = $this->imapClient($email, $password, $authUser);
         $client->connect();
-        $folder = $client->getFolder($folderPath);
-        $query = $folder->messages()->all();
 
-        if (filled($search)) {
-            $query = $query->text($search);
+        $paths = $folderPath === self::ALL_MAIL
+            ? array_values(array_filter(
+                $client->getFolders()->map(fn ($f) => $f->path)->values()->all(),
+                fn ($path) => ! in_array($path, self::EXCLUDED_FROM_ALL, true),
+            ))
+            : [$folderPath];
+
+        $items = [];
+
+        foreach ($paths as $path) {
+            $folder = $client->getFolder($path);
+
+            if (! $folder) {
+                continue;
+            }
+
+            // Newest first, so the limit keeps the latest messages, not the oldest.
+            $query = $folder->messages()->all()->setFetchOrderDesc();
+
+            if (filled($search)) {
+                $query = $query->text($search);
+            }
+
+            foreach ($query->limit($limit)->get() as $message) {
+                $items[] = [
+                    'uid' => $message->uid,
+                    'folder' => $path,
+                    'subject' => $this->decodeHeader((string) $message->subject) ?: '(no subject)',
+                    'from' => $this->decodeHeader((string) $message->from),
+                    'to' => $this->decodeHeader((string) $message->to),
+                    'date' => $message->date?->toDate()?->format('d.m.Y H:i'),
+                    'timestamp' => (int) $message->date?->toDate()?->getTimestamp(),
+                    'seen' => $message->hasFlag('Seen'),
+                    'thread_key' => (string) ($message->references->first() ?: ($message->in_reply_to->first() ?: $message->message_id)),
+                ];
+            }
         }
 
-        $collection = $query->limit($limit)->get();
         $client->disconnect();
 
-        return $collection->reverse()->map(fn ($message) => [
-            'uid' => $message->uid,
-            'subject' => (string) $message->subject ?: '(no subject)',
-            'from' => (string) $message->from,
-            'to' => (string) $message->to,
-            'date' => $message->date?->toDate()?->format('d.m.Y H:i'),
-            'seen' => $message->hasFlag('Seen'),
-            'thread_key' => (string) ($message->references->first() ?: ($message->in_reply_to->first() ?: $message->message_id)),
-        ])->values()->all();
+        usort($items, fn ($a, $b) => $b['timestamp'] <=> $a['timestamp']);
+
+        return array_slice($items, 0, $limit);
     }
 
     /**
-     * @return array<int, array{uid:int, folder:string, subject:string, from:string, date:?string, body:string, seen:bool}>
+     * @return array<int, array{uid:int, folder:string, subject:string, from:string, to:string, date:?string, body:string, seen:bool, attachments:array}>
      */
     public function getThread(string $email, string $password, int $uid, string $folderPath = 'INBOX', ?string $authUser = null): array
     {
@@ -70,29 +108,217 @@ class WebmailService
 
         $result = $thread
             ->sortBy(fn ($m) => $m->date?->toDate())
-            ->map(fn ($m) => [
-                'uid' => $m->uid,
-                'folder' => $m->getFolder()?->name,
-                'subject' => (string) $m->subject ?: '(no subject)',
-                'from' => (string) $m->from,
-                'to' => (string) $m->to,
-                'date' => $m->date?->toDate()?->format('d.m.Y H:i'),
-                'body' => $m->hasHTMLBody() ? $m->getHTMLBody() : nl2br(e($m->getTextBody())),
-                'message_id' => (string) $m->message_id,
-                'seen' => $m->hasFlag('Seen'),
-                'attachments' => $m->getAttachments()->map(fn ($a) => [
-                    'id' => $a->id,
-                    'name' => $a->name ?: $a->filename ?: 'attachment',
-                    'size' => $a->size,
-                    'content_type' => $a->content_type,
-                ])->values()->all(),
-            ])
+            ->map(function ($m) {
+                [$body, $inlineIds] = $this->renderBody($m);
+
+                return [
+                    'uid' => $m->uid,
+                    'folder' => $m->getFolder()?->path,
+                    'subject' => $this->decodeHeader((string) $m->subject) ?: '(no subject)',
+                    'from' => $this->decodeHeader((string) $m->from),
+                    'to' => $this->decodeHeader((string) $m->to),
+                    'date' => $m->date?->toDate()?->format('d.m.Y H:i'),
+                    'body' => $body,
+                    'message_id' => (string) $m->message_id,
+                    'seen' => $m->hasFlag('Seen'),
+                    // Images already shown inside the body are not listed again.
+                    'attachments' => $m->getAttachments()
+                        ->reject(fn ($a) => in_array($a->id, $inlineIds, true))
+                        ->map(fn ($a) => [
+                            'id' => $a->id,
+                            'name' => $this->decodeHeader((string) ($a->name ?: $a->filename ?: 'attachment')),
+                            'size' => $a->size,
+                            'content_type' => $a->content_type,
+                        ])->values()->all(),
+                ];
+            })
             ->values()
             ->all();
 
         $client->disconnect();
 
         return $result;
+    }
+
+    /**
+     * Loads one message for editing as a draft.
+     *
+     * @return array{to:string, cc:array<int,string>, bcc:array<int,string>, subject:string, body:string, in_reply_to:?string, draft_id:string}
+     */
+    public function getDraft(string $email, string $password, int $uid, ?string $authUser = null): array
+    {
+        $client = $this->imapClient($email, $password, $authUser);
+        $client->connect();
+        $message = $client->getFolder('Drafts')->query()->getMessageByUid($uid);
+
+        $addresses = fn ($attr) => collect($attr->all())->map(fn ($a) => $a->mail)->filter()->values()->all();
+
+        $result = [
+            'to' => implode(', ', $addresses($message->to)),
+            'cc' => $addresses($message->cc),
+            'bcc' => $addresses($message->bcc),
+            'subject' => $this->decodeHeader((string) $message->subject),
+            'body' => $message->hasHTMLBody() ? $message->getHTMLBody() : nl2br(e($message->getTextBody())),
+            'in_reply_to' => ((string) $message->in_reply_to->first()) ?: null,
+            'draft_id' => trim((string) $message->message_id, '<>'),
+        ];
+
+        $client->disconnect();
+
+        return $result;
+    }
+
+    /**
+     * Saves (or replaces) a draft in the Drafts folder. A draft is identified
+     * by its Message-ID, which stays the same across saves, so the caller
+     * never needs to track IMAP UIDs.
+     *
+     * @param  array<int, string>  $cc
+     * @return string The draft's id, to pass back on the next save.
+     */
+    public function saveDraft(
+        string $email,
+        string $password,
+        ?string $to,
+        string $subject,
+        string $body,
+        array $cc = [],
+        ?string $inReplyTo = null,
+        ?string $draftId = null,
+        ?string $authUser = null,
+        array $bcc = [],
+    ): string {
+        $draftId = $draftId ?: bin2hex(random_bytes(12)).'@'.(substr(strrchr($email, '@'), 1) ?: 'localhost');
+
+        $mime = (new MimeEmail())->from($email)->subject($subject)->html($body);
+
+        if (filled($to)) {
+            $mime->to($to);
+        }
+
+        if (! empty($cc)) {
+            $mime->cc(...$cc);
+        }
+
+        if (! empty($bcc)) {
+            $mime->bcc(...$bcc);
+        }
+
+        $mime->getHeaders()->addIdHeader('Message-ID', $draftId);
+
+        if (filled($inReplyTo)) {
+            $mime->getHeaders()->addIdHeader('In-Reply-To', trim($inReplyTo, '<>'));
+        }
+
+        $client = $this->imapClient($email, $password, $authUser);
+        $client->connect();
+
+        $drafts = $client->getFolder('Drafts');
+
+        if (! $drafts) {
+            $client->createFolder('Drafts', false);
+            $drafts = $client->getFolder('Drafts');
+        }
+
+        $this->expungeByMessageId($drafts, $draftId);
+        $drafts->appendMessage($mime->toString(), ['\\Draft', '\\Seen']);
+        $client->disconnect();
+
+        return $draftId;
+    }
+
+    public function deleteDraft(string $email, string $password, string $draftId, ?string $authUser = null): void
+    {
+        $client = $this->imapClient($email, $password, $authUser);
+        $client->connect();
+
+        if ($drafts = $client->getFolder('Drafts')) {
+            $this->expungeByMessageId($drafts, $draftId);
+        }
+
+        $client->disconnect();
+    }
+
+    private function expungeByMessageId($folder, string $messageId): void
+    {
+        $folder->messages()->all()->whereMessageId($messageId)->get()
+            ->each(fn ($old) => $old->delete(true));
+    }
+
+    /**
+     * Returns the HTML for display with `cid:` image references (Gmail and
+     * Outlook inline pictures) inlined as data URIs, plus the attachment ids
+     * that were consumed that way.
+     *
+     * @return array{0:string, 1:array<int,string>}
+     */
+    private function renderBody($message): array
+    {
+        if (! $message->hasHTMLBody()) {
+            return [nl2br(e($message->getTextBody())), []];
+        }
+
+        $html = $message->getHTMLBody();
+        $consumed = [];
+
+        if (stripos($html, 'cid:') === false) {
+            return [$html, $consumed];
+        }
+
+        $budget = self::MAX_INLINE_TOTAL_BYTES;
+
+        foreach ($message->getAttachments() as $attachment) {
+            $id = (string) $attachment->id;
+            $type = (string) $attachment->content_type;
+
+            if ($id === '' || ! str_starts_with(strtolower($type), 'image/')) {
+                continue;
+            }
+
+            $needles = array_unique(['cid:'.$id, 'cid:'.rawurlencode($id)]);
+
+            if (! array_filter($needles, fn ($n) => stripos($html, $n) !== false)) {
+                continue;
+            }
+
+            $consumed[] = $id;
+            $content = (string) $attachment->content;
+            $size = strlen($content);
+
+            if ($size === 0 || $size > self::MAX_INLINE_IMAGE_BYTES || $size > $budget) {
+                continue;
+            }
+
+            $budget -= $size;
+            $html = str_ireplace($needles, 'data:'.$type.';base64,'.base64_encode($content), $html);
+        }
+
+        return [$html, $consumed];
+    }
+
+    /**
+     * Subjects and names sometimes arrive still MIME-encoded
+     * (`=?UTF-8?B?...?=`) when the library could not decode them.
+     */
+    public function decodeHeader(?string $value): string
+    {
+        $value = trim((string) $value);
+
+        for ($i = 0; $i < 2 && str_contains($value, '=?'); $i++) {
+            $decoded = @iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+
+            if ($decoded === false || $decoded === $value) {
+                $decoded = @mb_decode_mimeheader($value);
+            }
+
+            if (! is_string($decoded) || $decoded === '' || $decoded === $value) {
+                break;
+            }
+
+            $value = $decoded;
+        }
+
+        return $value;
     }
 
     /**
@@ -112,7 +338,7 @@ class WebmailService
         }
 
         return [
-            'name' => $attachment->name ?: $attachment->filename ?: 'attachment',
+            'name' => $this->decodeHeader((string) ($attachment->name ?: $attachment->filename ?: 'attachment')),
             'contentType' => $attachment->content_type ?: 'application/octet-stream',
             'content' => $attachment->content,
         ];
@@ -130,8 +356,8 @@ class WebmailService
 
         $result = [
             'uid' => $uid,
-            'subject' => (string) $message->subject,
-            'from' => (string) $message->from,
+            'subject' => $this->decodeHeader((string) $message->subject),
+            'from' => $this->decodeHeader((string) $message->from),
             'date' => $message->date?->toDate()?->format('d.m.Y H:i'),
             'body' => $message->hasHTMLBody()
                 ? $message->getHTMLBody()
@@ -197,7 +423,7 @@ class WebmailService
         $extra = array_values(array_diff($existing, self::STANDARD_FOLDERS));
         $ordered = [...$standard, ...$extra];
 
-        return array_map(function ($path) {
+        $folders = array_map(function ($path) {
             $name = in_array($path, self::STANDARD_FOLDERS, true)
                 ? $path
                 : (string) EncodingAliases::convert($path, 'UTF7-IMAP', 'UTF-8');
@@ -208,6 +434,18 @@ class WebmailService
                 'standard' => in_array($path, self::STANDARD_FOLDERS, true),
             ];
         }, $ordered);
+
+        // Virtual folders: All mail goes first, Scheduled right after Drafts.
+        $insertAfter = function (array $list, string $anchor, array $item) {
+            $at = array_search($anchor, array_column($list, 'name'), true);
+            array_splice($list, $at === false ? count($list) : $at + 1, 0, [$item]);
+
+            return $list;
+        };
+
+        $folders = $insertAfter($folders, 'Drafts', ['name' => self::SCHEDULED, 'label' => 'Scheduled', 'standard' => true, 'virtual' => true]);
+
+        return [['name' => self::ALL_MAIL, 'label' => 'All mail', 'standard' => true, 'virtual' => true], ...$folders];
     }
 
     public function createFolder(string $email, string $password, string $name, ?string $authUser = null): void
@@ -279,6 +517,8 @@ class WebmailService
         ?string $inReplyTo = null,
         ?string $authUser = null,
         array $attachments = [],
+        ?string $draftId = null,
+        array $bcc = [],
     ): void {
         $transport = new EsmtpTransport(config('mail_server.smtp_host'), 465, true);
         $transport->setUsername($authUser ?? $email);
@@ -302,6 +542,10 @@ class WebmailService
             $mime->cc(...$cc);
         }
 
+        if (! empty($bcc)) {
+            $mime->bcc(...$bcc);
+        }
+
         if (filled($inReplyTo)) {
             $mime->getHeaders()
                 ->addIdHeader('In-Reply-To', $inReplyTo)
@@ -315,6 +559,10 @@ class WebmailService
         $transport->send($mime);
 
         $this->appendToSent($email, $password, $mime->toString(), $authUser);
+
+        if (filled($draftId)) {
+            $this->deleteDraft($email, $password, $draftId, $authUser);
+        }
     }
 
     private function appendToSent(string $email, string $password, string $raw, ?string $authUser = null): void

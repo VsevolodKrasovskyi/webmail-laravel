@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Mailbox;
+use App\Models\ScheduledEmail;
 use App\Services\WebmailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -38,11 +39,31 @@ class WebmailController extends Controller
         $subject = (string) $request->query('subject', '');
         $body = '';
         $inReplyTo = null;
+        $draftId = null;
+        $cc = [];
+        $bcc = [];
+
+        if ($draftUid = $request->query('draft_uid')) {
+            try {
+                $draft = $this->webmail->getDraft(
+                    $credentials['email'], $credentials['password'], (int) $draftUid, $credentials['auth_user'] ?? null,
+                );
+                $to = $draft['to'];
+                $cc = $draft['cc'];
+                $bcc = $draft['bcc'];
+                $subject = $draft['subject'];
+                $body = $draft['body'];
+                $inReplyTo = $draft['in_reply_to'];
+                $draftId = $draft['draft_id'];
+            } catch (Throwable) {
+                // Fall back to a blank compose rather than blocking the page.
+            }
+        }
 
         $quoteUid = $request->query('quote_uid');
         $quoteFolder = (string) $request->query('quote_folder', 'INBOX');
 
-        if ($quoteUid) {
+        if ($quoteUid && ! $draftId) {
             try {
                 $thread = $this->webmail->getThread(
                     $credentials['email'], $credentials['password'], (int) $quoteUid, $quoteFolder, $credentials['auth_user'] ?? null,
@@ -64,7 +85,11 @@ class WebmailController extends Controller
             'to' => $to,
             'subject' => $subject,
             'body' => $body,
+            'cc' => $cc,
+            'bcc' => $bcc,
             'inReplyTo' => $inReplyTo,
+            'draftId' => $draftId,
+            'canSchedule' => filled(config('mail_server.dovecot_master_password')),
         ]);
     }
 
@@ -140,6 +165,10 @@ class WebmailController extends Controller
         $folder = $request->query('folder', 'INBOX');
         $search = $request->query('search');
 
+        if ($folder === WebmailService::SCHEDULED) {
+            return response()->json(['messages' => $this->scheduledItems($credentials['email'], $search)]);
+        }
+
         try {
             return response()->json([
                 'messages' => $this->webmail->listMessages(
@@ -160,6 +189,12 @@ class WebmailController extends Controller
         }
 
         $folder = $request->query('folder', 'INBOX');
+
+        if ($folder === WebmailService::SCHEDULED) {
+            $mail = $this->ownScheduled($credentials['email'], $uid);
+
+            return response()->json(['messages' => [$this->scheduledDetail($mail)]]);
+        }
 
         try {
             return response()->json([
@@ -203,6 +238,12 @@ class WebmailController extends Controller
         }
 
         $folder = $request->query('folder', 'INBOX');
+
+        if ($folder === WebmailService::SCHEDULED) {
+            $this->ownScheduled($credentials['email'], $uid)->delete();
+
+            return response()->json(['ok' => true]);
+        }
 
         try {
             $this->webmail->deleteMessage(
@@ -358,7 +399,10 @@ class WebmailController extends Controller
             'body' => ['required', 'string'],
             'cc' => ['nullable', 'array'],
             'cc.*' => ['email'],
+            'bcc' => ['nullable', 'array'],
+            'bcc.*' => ['email'],
             'in_reply_to' => ['nullable', 'string', 'max:255'],
+            'draft_id' => ['nullable', 'string', 'max:255'],
             'attachments' => ['nullable', 'array', 'max:10'],
             'attachments.*.name' => ['required', 'string', 'max:255'],
             'attachments.*.contentType' => ['required', 'string', 'max:255'],
@@ -376,12 +420,169 @@ class WebmailController extends Controller
                 $data['in_reply_to'] ?? null,
                 $credentials['auth_user'] ?? null,
                 $data['attachments'] ?? [],
+                $data['draft_id'] ?? null,
+                $data['bcc'] ?? [],
             );
 
             return response()->json(['ok' => true]);
         } catch (Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    public function saveDraft(Request $request): JsonResponse
+    {
+        $credentials = $this->credentials($request);
+
+        if (! $credentials) {
+            return response()->json(['error' => 'not_connected'], 401);
+        }
+
+        $data = $request->validate([
+            'to' => ['required', 'email'],
+            'subject' => ['required', 'string', 'max:255'],
+            'body' => ['nullable', 'string'],
+            'cc' => ['nullable', 'array'],
+            'cc.*' => ['email'],
+            'bcc' => ['nullable', 'array'],
+            'bcc.*' => ['email'],
+            'in_reply_to' => ['nullable', 'string', 'max:255'],
+            'draft_id' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        try {
+            $draftId = $this->webmail->saveDraft(
+                $credentials['email'],
+                $credentials['password'],
+                $data['to'] ?? null,
+                $data['subject'] ?? '',
+                $data['body'] ?? '',
+                $data['cc'] ?? [],
+                $data['in_reply_to'] ?? null,
+                $data['draft_id'] ?? null,
+                $credentials['auth_user'] ?? null,
+                $data['bcc'] ?? [],
+            );
+
+            return response()->json(['draft_id' => $draftId]);
+        } catch (Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Queues a message in the scheduled_emails table; `php artisan
+     * schedule:run` (cron) sends it once send_at has passed.
+     */
+    public function schedule(Request $request): JsonResponse
+    {
+        $credentials = $this->credentials($request);
+
+        if (! $credentials) {
+            return response()->json(['error' => 'not_connected'], 401);
+        }
+
+        if (blank(config('mail_server.dovecot_master_password'))) {
+            return response()->json(['error' => 'Set DOVECOT_MASTER_PASSWORD to enable scheduled sending.'], 422);
+        }
+
+        $data = $request->validate([
+            'to' => ['required', 'email'],
+            'subject' => ['required', 'string', 'max:255'],
+            'body' => ['required', 'string'],
+            'cc' => ['nullable', 'array'],
+            'cc.*' => ['email'],
+            'bcc' => ['nullable', 'array'],
+            'bcc.*' => ['email'],
+            'in_reply_to' => ['nullable', 'string', 'max:255'],
+            'draft_id' => ['nullable', 'string', 'max:255'],
+            'send_at' => ['required', 'date', 'after:now'],
+            'attachments' => ['nullable', 'array', 'max:10'],
+            'attachments.*.name' => ['required', 'string', 'max:255'],
+            'attachments.*.contentType' => ['required', 'string', 'max:255'],
+            'attachments.*.content' => ['required', 'string'],
+        ]);
+
+        $mail = ScheduledEmail::create([
+            'mailbox_email' => $credentials['email'],
+            'to' => $data['to'],
+            'cc' => $data['cc'] ?? [],
+            'bcc' => $data['bcc'] ?? [],
+            'subject' => $data['subject'],
+            'body' => $data['body'],
+            'in_reply_to' => $data['in_reply_to'] ?? null,
+            'attachments' => $data['attachments'] ?? [],
+            'send_at' => $data['send_at'],
+            'status' => ScheduledEmail::PENDING,
+        ]);
+
+        if (filled($data['draft_id'] ?? null)) {
+            try {
+                $this->webmail->deleteDraft(
+                    $credentials['email'], $credentials['password'], $data['draft_id'], $credentials['auth_user'] ?? null,
+                );
+            } catch (Throwable) {
+                // The schedule is saved; a leftover draft is harmless.
+            }
+        }
+
+        return response()->json(['ok' => true, 'id' => $mail->id]);
+    }
+
+    private function ownScheduled(string $email, int $id): ScheduledEmail
+    {
+        return ScheduledEmail::where('mailbox_email', $email)->findOrFail($id);
+    }
+
+    /**
+     * Scheduled rows shaped like IMAP list items so the inbox UI can show them.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function scheduledItems(string $email, ?string $search): array
+    {
+        return ScheduledEmail::where('mailbox_email', $email)
+            ->whereIn('status', [ScheduledEmail::PENDING, ScheduledEmail::SENDING, ScheduledEmail::FAILED])
+            ->when(filled($search), fn ($q) => $q->where(fn ($q) => $q
+                ->where('subject', 'ilike', "%{$search}%")
+                ->orWhere('to', 'ilike', "%{$search}%")))
+            ->orderBy('send_at')
+            ->limit(100)
+            ->get()
+            ->map(fn (ScheduledEmail $m) => [
+                'uid' => $m->id,
+                'folder' => WebmailService::SCHEDULED,
+                'subject' => $m->subject,
+                'from' => $m->mailbox_email,
+                'to' => $m->to,
+                'date' => null,
+                'send_at' => $m->send_at->toIso8601String(),
+                'status' => $m->status,
+                'seen' => true,
+                'thread_key' => 'scheduled:'.$m->id,
+            ])
+            ->all();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function scheduledDetail(ScheduledEmail $m): array
+    {
+        return [
+            'uid' => $m->id,
+            'folder' => WebmailService::SCHEDULED,
+            'subject' => $m->subject,
+            'from' => $m->mailbox_email,
+            'to' => $m->to,
+            'date' => null,
+            'send_at' => $m->send_at->toIso8601String(),
+            'status' => $m->status,
+            'error' => $m->error,
+            'body' => $m->body,
+            'seen' => true,
+            'attachments' => [],
+        ];
     }
 
     /**
