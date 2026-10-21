@@ -1,4 +1,5 @@
 <script setup>
+import { Head } from '@inertiajs/vue3';
 import { useForm, usePage } from '@inertiajs/vue3';
 import { UserIcon, KeyRoundIcon } from '@lucide/vue';
 import AppLayout from '../Layouts/AppLayout.vue';
@@ -34,6 +35,7 @@ function savePassword() {
 
 <template>
     <AppLayout>
+        <Head title="Settings" />
         <div class="mb-8">
             <h2 class="text-2xl font-semibold tracking-tight">Settings</h2>
             <p class="mt-1 text-sm text-muted-foreground">Manage your admin account.</p>

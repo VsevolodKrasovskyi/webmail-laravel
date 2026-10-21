@@ -1,4 +1,5 @@
 <script setup>
+import { Head } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
 import { useForm, router } from '@inertiajs/vue3';
 import { PlusIcon, Trash2Icon, PencilIcon, InboxIcon } from '@lucide/vue';
@@ -122,6 +123,7 @@ function confirmDelete() {
 
 <template>
     <AppLayout>
+        <Head title="Mailboxes" />
         <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-xl font-semibold">Mailboxes</h2>
             <Dialog v-model:open="createOpen">

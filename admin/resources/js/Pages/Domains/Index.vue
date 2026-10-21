@@ -1,4 +1,5 @@
 <script setup>
+import { Head } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
 import { useForm, router } from '@inertiajs/vue3';
 import { PlusIcon, Trash2Icon, CloudIcon } from '@lucide/vue';
@@ -101,6 +102,7 @@ function syncDns(domain) {
 
 <template>
     <AppLayout>
+        <Head title="Domains" />
         <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-xl font-semibold">Domains</h2>
             <Dialog v-model:open="createOpen">

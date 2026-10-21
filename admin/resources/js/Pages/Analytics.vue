@@ -1,4 +1,5 @@
 <script setup>
+import { Head } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import { DownloadIcon, CircleCheckIcon, TriangleAlertIcon } from '@lucide/vue';
 import AppLayout from '../Layouts/AppLayout.vue';
@@ -72,6 +73,7 @@ const exports = [
 
 <template>
     <AppLayout>
+        <Head title="Analytics" />
         <div class="mx-auto max-w-6xl space-y-6">
             <div class="flex flex-wrap items-end justify-between gap-4">
                 <div>

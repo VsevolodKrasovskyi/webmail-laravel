@@ -1,4 +1,5 @@
 <script setup>
+import { Head } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import { Link, usePage } from '@inertiajs/vue3';
 import {
@@ -45,6 +46,7 @@ function formatQuota(mb) {
 
 <template>
     <AppLayout>
+        <Head title="Dashboard" />
         <div class="mx-auto max-w-6xl space-y-6">
             <div class="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-indigo-500/15 via-sky-500/10 to-transparent p-6 sm:p-8">
                 <div class="relative flex flex-wrap items-center justify-between gap-4">

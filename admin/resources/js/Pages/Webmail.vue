@@ -1,4 +1,5 @@
 <script setup>
+import { Head } from '@inertiajs/vue3';
 import { ref, computed, watch, onMounted } from 'vue';
 import { Link, useForm, router } from '@inertiajs/vue3';
 import { toast } from 'vue-sonner';
@@ -367,6 +368,7 @@ onMounted(() => {
 
 <template>
     <AppLayout>
+        <Head title="Webmail" />
         <h2 class="mb-6 text-xl font-semibold">Webmail</h2>
 
         <Card v-if="! connected" class="mx-auto max-w-md">

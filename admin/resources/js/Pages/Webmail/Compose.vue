@@ -1,4 +1,5 @@
 <script setup>
+import { Head } from '@inertiajs/vue3';
 import { ref, watch, onBeforeUnmount } from 'vue';
 import { Link } from '@inertiajs/vue3';
 import { toast } from 'vue-sonner';
@@ -219,6 +220,7 @@ async function send() {
 
 <template>
     <AppLayout>
+        <Head title="New message" />
         <div class="mx-auto w-full max-w-3xl">
             <div class="mb-4 flex items-center gap-3">
                 <Link href="/webmail" class="rounded-full p-2 text-muted-foreground transition hover:bg-accent" aria-label="Back to webmail">

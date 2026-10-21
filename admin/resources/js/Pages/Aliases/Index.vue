@@ -1,4 +1,5 @@
 <script setup>
+import { Head } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
 import { useForm, router } from '@inertiajs/vue3';
 import { PlusIcon, Trash2Icon } from '@lucide/vue';
@@ -94,6 +95,7 @@ function confirmDelete() {
 
 <template>
     <AppLayout>
+        <Head title="Aliases" />
         <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-xl font-semibold">Aliases</h2>
             <Dialog v-model:open="createOpen">

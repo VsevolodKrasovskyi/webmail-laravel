@@ -1,4 +1,5 @@
 <script setup>
+import { Head } from '@inertiajs/vue3';
 import { useForm, usePage } from '@inertiajs/vue3';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +26,7 @@ function submit() {
 </script>
 
 <template>
+    <Head title="Sign in" />
     <div class="flex min-h-screen items-center justify-center bg-background px-4">
         <Card class="w-full max-w-sm">
             <CardHeader>
