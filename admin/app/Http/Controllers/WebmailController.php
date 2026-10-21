@@ -226,6 +226,7 @@ class WebmailController extends Controller
         return response($attachment['content'], 200, [
             'Content-Type' => $attachment['contentType'],
             'Content-Disposition' => 'attachment; filename="'.addslashes($attachment['name']).'"',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 

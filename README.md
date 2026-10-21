@@ -228,18 +228,18 @@ If a domain's DNS is hosted on Cloudflare, the panel can publish its mail DNS re
 
 ### What it changes
 
-For the selected domain `example.com` it creates the record if it does not exist, otherwise it **overwrites the first existing record of the same type and name**:
+For the selected domain `example.com`:
 
-| Record | Name | Value |
-|---|---|---|
-| MX | `example.com` | `APP_DOMAIN`, priority 10 |
-| TXT (SPF) | `example.com` | `v=spf1 mx ~all` |
-| TXT (DKIM) | `mail._domainkey.example.com` | `v=DKIM1; k=rsa; p=<public key of the domain>` |
-| TXT (DMARC) | `_dmarc.example.com` | `v=DMARC1; p=quarantine; rua=mailto:postmaster@example.com` |
+| Record | Name | Value | If something is already there |
+|---|---|---|---|
+| MX | `example.com` | `APP_DOMAIN`, priority 10 | Another provider's MX is **left untouched** and a warning is shown. Our MX is created next to it, or updated if it already points at `APP_DOMAIN`. |
+| TXT (SPF) | `example.com` | `v=spf1 mx ~all` | An existing SPF is **kept** and reported, because it may list other senders. Other TXT records (site verification etc.) are never touched. |
+| TXT (DKIM) | `mail._domainkey.example.com` | `v=DKIM1; k=rsa; p=<public key of the domain>` | Updated in place when the key differs. |
+| TXT (DMARC) | `_dmarc.example.com` | `v=DMARC1; p=quarantine; rua=mailto:postmaster@example.com` | An existing policy is **kept**. |
 
-All records get TTL 3600. It never creates zones, never deletes records and never touches the PTR record or the A/AAAA record of `APP_DOMAIN`.
+Records are matched by content (`v=spf1`, `v=DKIM1`, `v=DMARC1`, the MX target), not just by type and name. All new records get TTL 3600. The sync never deletes anything, never creates zones and never touches the PTR record or the A/AAAA record of `APP_DOMAIN`. The result of every record (`created`, `updated`, `unchanged` or `kept`) is shown after the sync.
 
-> **Check before you run it on a live domain.** The match is by type and name only. If the apex of `example.com` already has several TXT records (site verification, another SPF) or an MX from another provider, the first one found is replaced. Back up the zone first (Cloudflare, DNS, Records, Export) and try it on a test domain.
+If another MX is reported, mail may still be delivered there. Remove it in Cloudflare yourself when all mail should come to this server.
 
 ### API token permissions
 
@@ -297,7 +297,7 @@ Dates in the UI, reports and CSV files use `APP_TIMEZONE` from `admin/.env` (def
 
 - `DOVECOT_MASTER_PASSWORD` logs in as any mailbox, over IMAP as well. Keep it long and secret, and rotate it if it leaks.
 - Postgres is published on loopback only. Redis is not published at all.
-- Webmail renders received HTML as is, without a sanitizer. Treat the webmail page as an admin tool for trusted mailboxes until that is added.
+- Received HTML is sanitized in the browser with DOMPurify before it is shown. Scripts, `style` blocks, iframes, forms, SVG and MathML, event handlers and `javascript:` or `data:` links are removed. Inline styles stay (without `position` and `z-index`), links open in a new tab with `noopener noreferrer`, and the message is clipped to its own box. Remote images are still loaded, so a sender can see that a message was opened. Attachments are served as downloads with `nosniff`.
 - Webmail keeps the mailbox password only in an encrypted session value. Scheduled sending does not store passwords, it authenticates through the master user.
 - "Sign in with Google" only works for an existing admin account with the same email and never creates users.
 - The mail ports are open to the internet by design, so keep the host patched and consider fail2ban for Dovecot and Postfix.

@@ -10,6 +10,7 @@ import {
 } from '@lucide/vue';
 import AppLayout from '../Layouts/AppLayout.vue';
 import { fetchJson } from '../fetchJson';
+import { sanitizeEmail } from '@/lib/sanitizeEmail';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -607,7 +608,7 @@ onMounted(() => {
                                             </Button>
                                         </div>
                                     </div>
-                                    <div class="min-h-[24rem] overflow-x-auto break-words bg-white p-4 text-sm text-neutral-900 [&_img]:h-auto [&_img]:max-w-full" v-html="m.body"></div>
+                                    <div class="min-h-[24rem] overflow-x-auto break-words bg-white p-4 text-sm text-neutral-900 [contain:paint] [&_img]:h-auto [&_img]:max-w-full" v-html="sanitizeEmail(m.body)"></div>
                                     <div v-if="m.attachments?.length" class="flex flex-wrap gap-2 border-t bg-muted/30 p-3">
                                         <a
                                             v-for="a in m.attachments"
