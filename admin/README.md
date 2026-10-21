@@ -5,7 +5,7 @@ Laravel 13, Vue 3 and Inertia admin panel with webmail. Setup, cron for schedule
 ```bash
 composer install
 cp .env.example .env && php artisan key:generate
-php artisan migrate && php artisan db:seed
+php artisan migrate
 npm ci && npm run dev      # or npm run build
 php artisan serve
 ```

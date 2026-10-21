@@ -5,6 +5,16 @@ use App\Models\User;
 return [
 
     /*
+    | Who may sign in. Login is Google-only, and a Google account is accepted
+    | only if its verified email is in this comma-separated list. The matching
+    | user row is created on first sign-in, no seeding or passwords involved.
+    */
+    'admin_emails' => array_values(array_filter(array_map(
+        fn ($email) => strtolower(trim($email)),
+        explode(',', (string) env('ADMIN_EMAIL', '')),
+    ))),
+
+    /*
     |--------------------------------------------------------------------------
     | Authentication Defaults
     |--------------------------------------------------------------------------

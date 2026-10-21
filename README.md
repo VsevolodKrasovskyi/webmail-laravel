@@ -13,7 +13,7 @@ Self-hosted mail server with a web admin panel and webmail.
 - Webmail: threads, search, folders, drag and drop, Cc/Bcc, rich text, attachments, inline images, drafts with autosave, an "All mail" view and scheduled sending.
 - Admin shortcut that opens any mailbox's webmail without its password (Dovecot master user).
 - Dashboard, analytics and CSV reports (domains, mailboxes, scheduled mail).
-- Login by email and password, optional "Sign in with Google" for existing admin accounts.
+- Google-only sign-in for admins listed in `ADMIN_EMAIL`, no passwords stored or seeded.
 - Responsive layout for phones.
 
 ## Architecture
@@ -112,17 +112,16 @@ cd admin
 cp .env.example .env
 # Set APP_URL, APP_DOMAIN, APP_ENV=production, APP_DEBUG=false, APP_TIMEZONE,
 # the same DB_* and DOVECOT_MASTER_PASSWORD as the root .env,
-# ADMIN_EMAIL and ADMIN_PASSWORD (at least 10 characters).
+# ADMIN_EMAIL (the Google address(es) allowed to sign in) and the GOOGLE_* values.
 # Set SESSION_SECURE_COOKIE=true when served over HTTPS.
 
 composer install --no-dev --optimize-autoloader
 php artisan key:generate
 php artisan migrate --force
-php artisan db:seed --force      # creates the first admin from ADMIN_EMAIL / ADMIN_PASSWORD
 npm ci && npm run build
 ```
 
-Point nginx at `admin/public` with php-fpm, then open the site and log in. After the first login you can blank `ADMIN_PASSWORD` in `.env`.
+Point nginx at `admin/public` with php-fpm, create the Google OAuth client (see "Sign in with Google" below), then open the site and sign in. The admin user is created automatically on the first sign-in.
 
 ### 3. Cron for scheduled mail
 
@@ -149,8 +148,8 @@ Two files, because two things read them. The root `.env` is for `docker-compose.
 
 | Variable | What it does |
 |---|---|
-| `APP_DOMAIN` | Mail hostname. Postfix banner, MX target and the certificate folder `/etc/letsencrypt/live/<APP_DOMAIN>/` used by Postfix and Dovecot. Same in `admin/.env`. |
-| `MAIL_DOMAIN` | Postfix `mydomain` (default domain for local addresses). |
+| `APP_DOMAIN` | **The server's hostname**, for example `mail.example.com`. It is the MX target, the Postfix and Dovecot hostname and banner, the TLS certificate name (`/etc/letsencrypt/live/<APP_DOMAIN>/`) and where mail clients connect. Needs a public A/AAAA record and a matching PTR. Same in `admin/.env`. |
+| `MAIL_DOMAIN` | **A domain name for Postfix's own local mail**, for example `example.com` (Postfix `mydomain` and `myorigin`). It is only the sender domain of system messages such as bounces from the container. It does **not** define which domains you host, those are added in the panel under Domains. Use your main domain. |
 | `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | Creates the Postgres database and user, and is what Postfix and Dovecot use for their SQL lookups. Same in `admin/.env`. |
 | `DOVECOT_MASTER_PASSWORD` | Password of the Dovecot master user. Lets the panel open any mailbox in webmail and send scheduled mail without mailbox passwords. Same in `admin/.env`. |
 
@@ -187,8 +186,8 @@ Two files, because two things read them. The root `.env` is for `docker-compose.
 
 | Variable | What it does |
 |---|---|
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Read by `php artisan db:seed` to create the first admin (password at least 10 characters). Can be blanked afterwards. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Optional "Sign in with Google" for an existing admin with the same email. Empty means disabled. |
+| `ADMIN_EMAIL` | Google addresses allowed to sign in, comma-separated (`a@example.com,b@example.com`). The admin user is created on the first sign-in. Changing the list takes effect at the next sign-in, and an address removed from it can no longer log in. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Google OAuth client for sign-in. Required, there is no other way to log in. |
 | `CLOUDFLARE_API_TOKEN` | Optional. Enables "Sync DNS" on the Domains page. |
 | `SESSION_DRIVER`, `SESSION_LIFETIME`, `SESSION_ENCRYPT`, `SESSION_PATH`, `SESSION_DOMAIN` | Session storage (database), lifetime in minutes and cookie scope. |
 | `SESSION_SECURE_COOKIE` | `true` when the panel is served over HTTPS. With `false` on HTTPS or `true` on plain HTTP login loops. |
@@ -202,6 +201,39 @@ Two files, because two things read them. The root `.env` is for `docker-compose.
 | `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` | Laravel's own outgoing mail. The panel does not send mail through it (webmail uses SMTP directly), so `log` is fine. |
 | `VITE_APP_NAME` | Exposed to the frontend build. Not used by the current code. |
 | `INERTIA_SSR_ENABLED` | Optional, default `false`. There is no SSR bundle. |
+
+## Sign in with Google
+
+Google is the only way into the panel, there are no passwords. Only accounts whose **verified** Google email is listed in `ADMIN_EMAIL` are let in, and the admin user is created automatically on the first sign-in.
+
+1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials) create an **OAuth client ID** of type **Web application**.
+2. Add this **Authorized redirect URI**, exactly as it will be used, scheme included:
+   `https://<your panel host>/auth/google/callback`
+3. Put the values in `admin/.env`:
+
+   ```env
+   ADMIN_EMAIL=you@example.com
+   GOOGLE_CLIENT_ID=...
+   GOOGLE_CLIENT_SECRET=...
+   GOOGLE_REDIRECT_URI=https://<your panel host>/auth/google/callback
+   ```
+4. Run `php artisan config:clear` and open the panel. Click **Sign in with Google**.
+
+If the Google client is deleted or misconfigured nobody can sign in. Fix it in `admin/.env`, there is no password fallback by design. Anyone who controls an address in `ADMIN_EMAIL` controls the panel, so protect those Google accounts with 2-step verification.
+
+## Connect a mail client
+
+After adding a domain and a mailbox you can use any mail client (Thunderbird, Apple Mail, Outlook, a phone). The server name is always `APP_DOMAIN`, not the domain of the address.
+
+| | Setting |
+|---|---|
+| **Username** | The full address, `user@example.com` |
+| **Password** | The mailbox password from the panel |
+| **Incoming (IMAP)** | `mail.example.com`, port **993**, SSL/TLS |
+| **Outgoing (SMTP)** | `mail.example.com`, port **465**, SSL/TLS (or **587** with STARTTLS) |
+| **Authentication** | Normal password. Plain logins are only accepted over TLS. |
+
+Port 143 exists but plaintext login is disabled, use 993. Port 25 is for server-to-server delivery only and does not accept client logins. The certificate must be valid for `APP_DOMAIN`, otherwise clients will show a warning. Set up the DNS records below first, or other servers will mark your mail as spam.
 
 ## Required DNS records per domain
 
@@ -299,7 +331,7 @@ Dates in the UI, reports and CSV files use `APP_TIMEZONE` from `admin/.env` (def
 - Postgres is published on loopback only. Redis is not published at all.
 - Received HTML is sanitized in the browser with DOMPurify before it is shown. Scripts, `style` blocks, iframes, forms, SVG and MathML, event handlers and `javascript:` or `data:` links are removed. Inline styles stay (without `position` and `z-index`), links open in a new tab with `noopener noreferrer`, and the message is clipped to its own box. Remote images are still loaded, so a sender can see that a message was opened. Attachments are served as downloads with `nosniff`.
 - Webmail keeps the mailbox password only in an encrypted session value. Scheduled sending does not store passwords, it authenticates through the master user.
-- "Sign in with Google" only works for an existing admin account with the same email and never creates users.
+- Sign-in is Google-only and limited to the verified addresses in `ADMIN_EMAIL`, so the panel has no stored passwords to leak or guess.
 - The mail ports are open to the internet by design, so keep the host patched and consider fail2ban for Dovecot and Postfix.
 
 ## Notes and limitations
