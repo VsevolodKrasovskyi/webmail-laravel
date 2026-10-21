@@ -5,7 +5,7 @@ import { Link, useForm, router } from '@inertiajs/vue3';
 import { toast } from 'vue-sonner';
 import {
     PenSquareIcon, RefreshCwIcon, LogOutIcon, ReplyIcon, Trash2Icon, FolderPlusIcon, FolderIcon,
-    InboxIcon, SendIcon, ShieldAlertIcon, XIcon, SearchIcon, ChevronDownIcon, ChevronRightIcon, MailIcon,
+    InboxIcon, SendIcon, ShieldAlertIcon, XIcon, SearchIcon, ChevronRightIcon, MailIcon,
     EraserIcon, PaperclipIcon, ArrowLeftIcon, FileTextIcon, ClockIcon, LayersIcon, XCircleIcon,
 } from '@lucide/vue';
 import AppLayout from '../Layouts/AppLayout.vue';
@@ -263,7 +263,6 @@ const threads = computed(() => {
 
 const thread = ref(null);
 const loadingThread = ref(false);
-const expandedUids = ref(new Set());
 
 async function openThread(item) {
     const uid = item.uid;
@@ -278,7 +277,6 @@ async function openThread(item) {
     try {
         const data = await fetchJson(`/webmail/messages/${uid}?folder=${encodeURIComponent(folder)}`);
         thread.value = data.messages;
-        expandedUids.value = new Set([thread.value.at(-1)?.uid]);
         for (const m of messages.value) {
             if (m.uid === uid && m.folder === folder) {
                 m.seen = true;
@@ -289,12 +287,6 @@ async function openThread(item) {
     } finally {
         loadingThread.value = false;
     }
-}
-
-function toggleExpanded(uid) {
-    const next = new Set(expandedUids.value);
-    next.has(uid) ? next.delete(uid) : next.add(uid);
-    expandedUids.value = next;
 }
 
 async function markUnread(uid, folder) {
@@ -318,11 +310,6 @@ function formatSize(bytes) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function snippet(html) {
-    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    return text.length > 140 ? `${text.slice(0, 140)}…` : text;
 }
 
 const deleteTarget = ref(null);
@@ -569,60 +556,41 @@ onMounted(() => {
 
                         <div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-2 sm:p-4">
                             <div v-for="m in thread" :key="m.uid" class="overflow-hidden rounded-xl border">
-                                <button
-                                    v-if="! expandedUids.has(m.uid)"
-                                    type="button"
-                                    class="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-accent"
-                                    @click="toggleExpanded(m.uid)"
-                                >
-                                    <span class="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white" :class="avatarColor(m.from)">
-                                        {{ initials(m.from) }}
-                                    </span>
-                                    <span class="min-w-0 flex-1 truncate">
-                                        <span class="font-medium">{{ senderName(m.from) }}</span>
-                                        <span class="text-muted-foreground"> — {{ snippet(m.body) }}</span>
-                                    </span>
-                                    <span class="shrink-0 text-xs text-muted-foreground">{{ itemDate(m) }}</span>
-                                    <ChevronRightIcon class="size-4 shrink-0 text-muted-foreground" />
-                                </button>
-                                <template v-else>
-                                    <div class="flex items-start justify-between gap-2 bg-muted/30 px-3 py-2.5">
-                                        <button type="button" class="flex min-w-0 flex-1 items-center gap-3 text-left" @click="toggleExpanded(m.uid)">
-                                            <span class="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white" :class="avatarColor(m.from)">
-                                                {{ initials(m.from) }}
+                                <div class="flex items-start justify-between gap-2 bg-muted/30 px-3 py-2.5">
+                                    <div class="flex min-w-0 flex-1 items-center gap-3 text-left">
+                                        <span class="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white" :class="avatarColor(m.from)">
+                                            {{ initials(m.from) }}
+                                        </span>
+                                        <span class="min-w-0 flex-1 truncate text-sm">
+                                            <span class="font-medium">{{ senderName(m.from) }}</span>
+                                            <span class="ml-1 text-xs text-muted-foreground">&lt;{{ extractEmail(m.from) }}&gt;</span>
+                                            <span class="ml-2 text-xs text-muted-foreground">{{ itemDate(m) }}</span>
+                                            <span class="block text-xs text-muted-foreground">To: {{ extractEmail(m.to) || '—' }}</span>
+                                            <span v-if="m.status" class="block text-xs" :class="m.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'">
+                                                {{ m.status === 'failed' ? `Failed: ${m.error ?? 'unknown error'}` : 'Waiting to be sent' }}
                                             </span>
-                                            <span class="min-w-0 flex-1 truncate text-sm">
-                                                <span class="font-medium">{{ senderName(m.from) }}</span>
-                                                <span class="ml-1 text-xs text-muted-foreground">&lt;{{ extractEmail(m.from) }}&gt;</span>
-                                                <span class="ml-2 text-xs text-muted-foreground">{{ itemDate(m) }}</span>
-                                                <span class="block text-xs text-muted-foreground">To: {{ extractEmail(m.to) || '—' }}</span>
-                                                <span v-if="m.status" class="block text-xs" :class="m.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'">
-                                                    {{ m.status === 'failed' ? `Failed: ${m.error ?? 'unknown error'}` : 'Waiting to be sent' }}
-                                                </span>
-                                            </span>
-                                            <ChevronDownIcon class="size-4 shrink-0 text-muted-foreground" />
-                                        </button>
-                                        <div class="flex shrink-0 gap-1">
-                                            <Button variant="ghost" size="icon-sm" title="Mark as unread" @click="markUnread(m.uid, m.folder)">
-                                                <MailIcon class="size-4" />
-                                            </Button>
-                                        </div>
+                                        </span>
                                     </div>
-                                    <div class="min-h-[24rem] overflow-x-auto break-words bg-white p-4 text-sm text-neutral-900 [contain:paint] [&_img]:h-auto [&_img]:max-w-full" v-html="sanitizeEmail(m.body)"></div>
-                                    <div v-if="m.attachments?.length" class="flex flex-wrap gap-2 border-t bg-muted/30 p-3">
-                                        <a
-                                            v-for="a in m.attachments"
-                                            :key="a.id"
-                                            :href="`/webmail/messages/${m.uid}/attachments/${a.id}?folder=${encodeURIComponent(m.folder)}`"
-                                            target="_blank"
-                                            class="flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-xs transition hover:bg-accent"
-                                        >
-                                            <PaperclipIcon class="size-3.5 text-muted-foreground" />
-                                            {{ a.name }}
-                                            <span class="text-muted-foreground">({{ formatSize(a.size) }})</span>
-                                        </a>
+                                    <div class="flex shrink-0 gap-1">
+                                        <Button variant="ghost" size="icon-sm" title="Mark as unread" @click="markUnread(m.uid, m.folder)">
+                                            <MailIcon class="size-4" />
+                                        </Button>
                                     </div>
-                                </template>
+                                </div>
+                                <div class="min-h-[24rem] overflow-x-auto break-words bg-white p-4 text-sm text-neutral-900 [contain:paint] [&_img]:h-auto [&_img]:max-w-full" v-html="sanitizeEmail(m.body)"></div>
+                                <div v-if="m.attachments?.length" class="flex flex-wrap gap-2 border-t bg-muted/30 p-3">
+                                    <a
+                                        v-for="a in m.attachments"
+                                        :key="a.id"
+                                        :href="`/webmail/messages/${m.uid}/attachments/${a.id}?folder=${encodeURIComponent(m.folder)}`"
+                                        target="_blank"
+                                        class="flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-xs transition hover:bg-accent"
+                                    >
+                                        <PaperclipIcon class="size-3.5 text-muted-foreground" />
+                                        {{ a.name }}
+                                        <span class="text-muted-foreground">({{ formatSize(a.size) }})</span>
+                                    </a>
+                                </div>
                             </div>
                         </div>
                     </template>
