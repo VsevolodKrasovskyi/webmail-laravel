@@ -1,174 +1,312 @@
 # Mail Server
 
-Self-hosted mail server stack: Postfix (SMTP) + Dovecot (IMAP/LMTP) + Rspamd
-(antispam, DKIM signing) + PostgreSQL (virtual domains/mailboxes/aliases) +
-a Laravel/Vue (Inertia) admin panel, fronted by nginx + certbot for TLS —
-the whole thing is a single self-contained `docker compose up`, no manual
-certificate handling required.
+Self-hosted mail server with a web admin panel and webmail.
+
+- **Postfix** (SMTP), **Dovecot** (IMAP, LMTP, SASL) and **Rspamd** (antispam, DKIM signing) run in Docker.
+- **PostgreSQL** holds domains, mailboxes, aliases, password hashes and quotas. Postfix and Dovecot read it directly.
+- **Admin panel** (Laravel 13, Vue 3, Inertia) runs on the host next to nginx and php-fpm. It manages the data above and includes webmail, drafts, scheduled sending and analytics.
+
+## Features
+
+- Domains, mailboxes and aliases (including catch-all) with per-mailbox quota.
+- Automatic DKIM key generation per domain, optional DNS sync through Cloudflare.
+- Webmail: threads, search, folders, drag and drop, Cc/Bcc, rich text, attachments, inline images, drafts with autosave, an "All mail" view and scheduled sending.
+- Admin shortcut that opens any mailbox's webmail without its password (Dovecot master user).
+- Dashboard, analytics and CSV reports (domains, mailboxes, scheduled mail).
+- Login by email and password, optional "Sign in with Google" for existing admin accounts.
+- Responsive layout for phones.
 
 ## Architecture
 
-```
-                        ┌────────────────┐
-        25/587/465 ───▶ │    postfix     │──▶ milter ──▶ ┌─────────┐
-        (SMTP)          │ (virtual smtp) │               │ rspamd  │
-                        └───────┬────────┘◀── DKIM sign ──└─────────┘
-                                │ LMTP
-                        ┌───────▼────────┐
-        143/993 ───────▶│    dovecot     │  (IMAP, Maildir, quota)
-        (IMAP)          └───────┬────────┘
-                                │
-                        ┌───────▼────────┐
-                        │   postgres     │◀── domains / mailboxes / aliases
-                        └───────▲────────┘
-                                │
-                        ┌───────┴────────┐
-         80/443 ───────▶│ admin-nginx +  │  Laravel + Vue (Inertia) panel
-        (HTTP/S)        │   admin-php    │  /dashboard, /domains, /webmail...
-                        └───────┬────────┘
-                                │ ACME http-01 (webroot)
-                        ┌───────▼────────┐
-                        │    certbot     │  issues/renews the one TLS cert
-                        └────────────────┘  shared by nginx, postfix, dovecot
+```mermaid
+flowchart LR
+    subgraph internet["Internet"]
+        sender(["Other mail servers"])
+        client(["Mail clients"])
+        browser(["Admin in a browser"])
+        cf(["Cloudflare API"])
+    end
+
+    subgraph host["Host"]
+        nginx["nginx + php-fpm<br/><b>Admin panel</b><br/>Laravel + Vue, webmail"]
+        cron["cron<br/>schedule:run, every minute"]
+        certbot[("/etc/letsencrypt<br/>TLS certificate")]
+        dkim[("docker/data/dkim<br/>DKIM private keys")]
+    end
+
+    subgraph docker["Docker compose"]
+        postfix["<b>Postfix</b><br/>SMTP"]
+        rspamd["<b>Rspamd</b><br/>spam checks, DKIM signing"]
+        redis[("Redis")]
+        dovecot["<b>Dovecot</b><br/>IMAP, LMTP, SASL"]
+        pg[("<b>PostgreSQL</b><br/>domains, mailboxes,<br/>aliases, scheduled mail")]
+        vmail[("vmail volume<br/>Maildir")]
+    end
+
+    sender -- "25" --> postfix
+    client -- "587 / 465 submit" --> postfix
+    client -- "143 / 993 read" --> dovecot
+    browser -- "443" --> nginx
+
+    postfix -- "milter 11332" --> rspamd
+    rspamd --- redis
+    postfix -- "LMTP 24" --> dovecot
+    postfix -. "SASL 12345" .-> dovecot
+    dovecot --- vmail
+
+    postfix -- "SQL lookups" --> pg
+    dovecot -- "SQL auth + quota" --> pg
+    nginx -- "read / write" --> pg
+
+    nginx -- "webmail: IMAP 993" --> dovecot
+    nginx -- "webmail: SMTP 465" --> postfix
+    nginx -- "writes keys" --> dkim
+    dkim -- "read-only" --> rspamd
+    cron --> nginx
+    nginx -. "optional DNS sync" .-> cf
+
+    certbot -. "read-only" .-> postfix
+    certbot -. "read-only" .-> dovecot
 ```
 
-All mail-routing state (domains, mailboxes, aliases, password hashes, quotas)
-lives in one Postgres database. Postfix and Dovecot read it directly via SQL
-lookup tables; the admin panel is the only thing that writes to it.
+| Part | Role |
+|---|---|
+| **Postfix** | Accepts mail on 25, takes authenticated submission on 587 and 465, looks up domains, mailboxes and aliases in Postgres, passes every message through Rspamd and delivers accepted mail to Dovecot over LMTP. |
+| **Rspamd** | Antispam milter. Signs outgoing mail with the per-domain DKIM keys. Uses Redis for its state. |
+| **Dovecot** | IMAP on 143 and 993, LMTP delivery into Maildir, SASL login for Postfix and per-mailbox quota from Postgres. |
+| **PostgreSQL** | Single source of truth for all mail routing data and the panel's own tables. Published on loopback only. |
+| **Admin panel** | Laravel and Vue (Inertia) on the host. Manages everything above, plus webmail, drafts, scheduled sending and analytics. The only component that writes to Postgres. |
+| **certbot** | Runs on the host and issues the one certificate that Postfix and Dovecot mount read-only. |
 
-- **postfix** — accepts mail on 25 (SMTP), 587 (submission, STARTTLS),
-  465 (SMTPS). Looks up virtual domains/mailboxes/aliases in Postgres,
-  authenticates senders via Dovecot SASL, hands every message to rspamd as a
-  milter, and delivers accepted mail to Dovecot over LMTP.
-- **dovecot** — IMAP (143/993) + LMTP (24, internal only) + SASL auth backend
-  for Postfix (12345, internal only). Mailboxes are Maildir under
-  `/var/mail/vhosts/<domain>/<local-part>`, one Unix user (`vmail`, uid 5000)
-  owns everything, per-mailbox quota comes straight from Postgres.
-- **rspamd** — antispam engine, wired into Postfix as a milter
-  (`inet:rspamd:11332`). Also signs outgoing mail with DKIM using keys the
-  admin panel generates per domain. Uses Redis for greylisting/ratelimits.
-- **admin-php / admin-nginx** — Laravel 13 backend + a Vue 3 / Inertia
-  frontend (no separate API, no SPA build step to manage by hand — Vite
-  builds it into the image). Covers domains/mailboxes/aliases CRUD, a
-  dashboard, and a small webmail page (read + send mail for any mailbox,
-  talking to Dovecot/Postfix over IMAP/SMTP). admin-php only ever touches
-  Postgres rows and DKIM key files — it has no privileged access to mail
-  delivery itself.
-- **certbot** — requests and renews a single Let's Encrypt certificate for
-  `APP_DOMAIN` via the HTTP-01 webroot challenge, and drops it into the
-  `certs` volume that nginx, postfix and dovecot all read from. Falls back to
-  a self-signed certificate (generated once by the one-shot `certs-init`
-  service) when the domain isn't publicly reachable yet, so the stack always
-  boots.
+The admin panel runs outside Docker and reaches Postgres on `127.0.0.1:5432` and Dovecot and Postfix on their published ports. TLS certificates come from the host's own certbot, and both containers mount `/etc/letsencrypt` read-only.
+
+## Requirements
+
+- A server with a public IP, a mail hostname with a valid DNS record and ports 25, 465, 587, 143 and 993 open
+- Docker with the compose plugin
+- PHP 8.4 or newer with `pdo_pgsql`, `mbstring`, `openssl`, `iconv`, plus Composer
+- A recent Node.js LTS (only to build the frontend)
+- nginx (or another web server) with php-fpm and certbot on the host
 
 ## First run
 
+### 1. Mail stack
+
 ```bash
 cp .env.example .env
-# edit .env: set APP_DOMAIN/MAIL_DOMAIN to your real hostname/domain,
-# CERTBOT_EMAIL, a real DB_PASSWORD, and ADMIN_EMAIL/ADMIN_PASSWORD.
+# Set APP_DOMAIN, MAIL_DOMAIN, DB_PASSWORD and DOVECOT_MASTER_PASSWORD.
+# Generate secrets with: openssl rand -base64 32 | tr -d '/+=' | cut -c1-32
+
+# Get a certificate for APP_DOMAIN first (Postfix and Dovecot wait for it):
+sudo certbot certonly --nginx -d mail.example.com
 
 docker compose up -d --build
 ```
 
-`APP_DOMAIN` must already have a public A/AAAA record pointing at this
-server, with port 80 reachable from the internet, before certbot can issue a
-real certificate — until then the stack serves a self-signed one so
-everything still works for local testing.
+Postfix and Dovecot refuse to start while `DB_PASSWORD` or `DOVECOT_MASTER_PASSWORD` is empty or `change-me`.
 
-On first boot `admin-php` runs migrations and seeds the admin user from
-`ADMIN_EMAIL`/`ADMIN_PASSWORD`. Open `https://<APP_DOMAIN>/` (or
-`https://localhost/` for local testing — accept the self-signed cert
-warning) and log in.
+### 2. Admin panel
 
-To add mail:
+```bash
+cd admin
+cp .env.example .env
+# Set APP_URL, APP_DOMAIN, APP_ENV=production, APP_DEBUG=false, APP_TIMEZONE,
+# the same DB_* and DOVECOT_MASTER_PASSWORD as the root .env,
+# ADMIN_EMAIL and ADMIN_PASSWORD (at least 10 characters).
+# Set SESSION_SECURE_COOKIE=true when served over HTTPS.
 
-1. **Domains** → add `example.com`. This auto-generates a 2048-bit DKIM
-   keypair; the private key is written to the shared `dkim` volume (read by
-   rspamd), and the public key is shown next to the domain (click "DNS") as
-   a ready-to-paste DNS TXT value.
-2. **Mailboxes** → add `user@example.com` + password. Postfix/Dovecot pick it
-   up immediately, no restart needed (everything is a live SQL lookup).
-3. **Aliases** → `info@example.com → user@example.com`, or `@example.com`
-   (catch-all) → any mailbox.
-4. **Webmail** → log in with any mailbox's own email/password to read its
-   inbox or send mail through it, right from the admin panel.
+composer install --no-dev --optimize-autoloader
+php artisan key:generate
+php artisan migrate --force
+php artisan db:seed --force      # creates the first admin from ADMIN_EMAIL / ADMIN_PASSWORD
+npm ci && npm run build
+```
+
+Point nginx at `admin/public` with php-fpm, then open the site and log in. After the first login you can blank `ADMIN_PASSWORD` in `.env`.
+
+### 3. Cron for scheduled mail
+
+Scheduled messages are stored in the database and sent by Laravel's scheduler. Add this entry for the user that runs the panel:
+
+```cron
+* * * * * cd /path/to/admin && php artisan schedule:run >> /dev/null 2>&1
+```
+
+Without it, messages queued with "Send later" are never sent. A message is retried up to 3 times and then marked as failed.
+
+### Adding mail
+
+1. **Domains**: add `example.com`. A 2048-bit DKIM key is generated, the private key is written to `docker/data/dkim` (read by rspamd) and the public key is shown under "DNS".
+2. **Mailboxes**: add `user@example.com` and a password. Postfix and Dovecot pick it up immediately.
+3. **Aliases**: `info@example.com` to `user@example.com`, or `@example.com` as a catch-all.
+4. **Webmail**: sign in with a mailbox's credentials, or use the inbox icon in the mailbox list.
+
+## Environment variables
+
+Two files, because two things read them. The root `.env` is for `docker-compose.yml` (Postgres, Postfix, Dovecot). `admin/.env` is for the Laravel panel on the host. Values marked "same" must be identical in both files.
+
+### Root `.env`
+
+| Variable | What it does |
+|---|---|
+| `APP_DOMAIN` | Mail hostname. Postfix banner, MX target and the certificate folder `/etc/letsencrypt/live/<APP_DOMAIN>/` used by Postfix and Dovecot. Same in `admin/.env`. |
+| `MAIL_DOMAIN` | Postfix `mydomain` (default domain for local addresses). |
+| `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | Creates the Postgres database and user, and is what Postfix and Dovecot use for their SQL lookups. Same in `admin/.env`. |
+| `DOVECOT_MASTER_PASSWORD` | Password of the Dovecot master user. Lets the panel open any mailbox in webmail and send scheduled mail without mailbox passwords. Same in `admin/.env`. |
+
+### `admin/.env` – application
+
+| Variable | What it does |
+|---|---|
+| `APP_NAME` | Application name (Laravel default, the browser title is set in the frontend). |
+| `APP_ENV` | `local` or `production`. |
+| `APP_KEY` | Encrypts sessions and the webmail credentials stored in the session. Create with `php artisan key:generate` and never change it on a live system without logging everyone out. |
+| `APP_DEBUG` | Detailed error pages. Must be `false` in production. |
+| `APP_URL` | Public URL of the panel. |
+| `APP_TIMEZONE` | Time zone for dates in the UI, reports and CSV files. Default `UTC`. |
+| `APP_LOCALE`, `APP_FALLBACK_LOCALE` | Laravel language settings. The UI itself is English only. |
+| `APP_FAKER_LOCALE` | Only used by factories and tests. |
+| `APP_MAINTENANCE_DRIVER` | Where `artisan down` keeps its state (`file`). |
+| `BCRYPT_ROUNDS` | Cost of the admin password hash. |
+| `LOG_CHANNEL`, `LOG_STACK`, `LOG_LEVEL`, `LOG_DEPRECATIONS_CHANNEL` | Logging. Logs go to `storage/logs/laravel.log`. |
+
+### `admin/.env` – database and mail server
+
+| Variable | What it does |
+|---|---|
+| `DB_CONNECTION`, `DB_HOST`, `DB_PORT` | Always `pgsql`, `127.0.0.1`, `5432` (Postgres is published on loopback). |
+| `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | Same as the root `.env`. |
+| `APP_DOMAIN` | Same as the root `.env`. Used as the MX target when syncing DNS. |
+| `DKIM_KEYS_PATH` | Where generated DKIM private keys are written. Must be the host path mounted into rspamd (`docker/data/dkim`, relative to `admin/`). |
+| `MAIL_DEFAULT_QUOTA_MB` | Quota suggested for new mailboxes. |
+| `IMAP_HOST`, `SMTP_HOST` | Where webmail connects (IMAP 993, SMTP 465). `127.0.0.1` because the panel runs on the same host. |
+| `DOVECOT_MASTER_PASSWORD` | Same as the root `.env`. |
+| `DOVECOT_MASTER_USER` | Optional, defaults to `admin`. Must match `docker/dovecot/master-users.template`. |
+
+### `admin/.env` – access
+
+| Variable | What it does |
+|---|---|
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Read by `php artisan db:seed` to create the first admin (password at least 10 characters). Can be blanked afterwards. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Optional "Sign in with Google" for an existing admin with the same email. Empty means disabled. |
+| `CLOUDFLARE_API_TOKEN` | Optional. Enables "Sync DNS" on the Domains page. |
+| `SESSION_DRIVER`, `SESSION_LIFETIME`, `SESSION_ENCRYPT`, `SESSION_PATH`, `SESSION_DOMAIN` | Session storage (database), lifetime in minutes and cookie scope. |
+| `SESSION_SECURE_COOKIE` | `true` when the panel is served over HTTPS. With `false` on HTTPS or `true` on plain HTTP login loops. |
+
+### `admin/.env` – framework defaults
+
+| Variable | What it does |
+|---|---|
+| `CACHE_STORE` | Cache backend (`database`). |
+| `QUEUE_CONNECTION`, `FILESYSTEM_DISK` | Laravel defaults. The panel does not use queues or file storage, scheduled mail goes through its own `scheduled_emails` table. |
+| `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` | Laravel's own outgoing mail. The panel does not send mail through it (webmail uses SMTP directly), so `log` is fine. |
+| `VITE_APP_NAME` | Exposed to the frontend build. Not used by the current code. |
+| `INERTIA_SSR_ENABLED` | Optional, default `false`. There is no SSR bundle. |
 
 ## Required DNS records per domain
 
 - **MX**: `example.com. MX 10 mail.example.com.`
-- **A/AAAA**: `mail.example.com` (i.e. `APP_DOMAIN`) → this server's IP.
-- **PTR (reverse DNS)**: the server's IP must resolve back to `APP_DOMAIN`
-  — set this with your hosting provider, not in this stack. Most receiving
-  servers reject mail from hosts without matching PTR records.
+- **A/AAAA**: `mail.example.com` (your `APP_DOMAIN`) pointing at the server.
+- **PTR**: the server IP must resolve back to `APP_DOMAIN`. Set this with your hosting provider. Many servers reject mail without it.
 - **SPF**: `example.com. TXT "v=spf1 mx ~all"`
-- **DKIM**: `<selector>._domainkey.example.com. TXT` with the value shown
-  next to the domain in the admin panel (selector is always `mail`).
+- **DKIM**: `mail._domainkey.example.com. TXT` with the value shown in the admin panel (the selector is always `mail`).
 - **DMARC**: `_dmarc.example.com. TXT "v=DMARC1; p=quarantine; rua=mailto:postmaster@example.com"`
 
 ## TLS certificates
 
-Handled automatically — no manual steps:
+Postfix and Dovecot read `/etc/letsencrypt/live/<APP_DOMAIN>/` from the host. After a renewal restart them, because they do not hot-reload certificates:
 
-- `certs-init` (one-shot) writes a self-signed certificate to the shared
-  `certs` volume on first boot, so nginx/postfix/dovecot always have
-  something to start with.
-- `certbot` (long-running) then requests a real Let's Encrypt certificate for
-  `APP_DOMAIN` over HTTP-01 (served by `admin-nginx` at
-  `/.well-known/acme-challenge/`), overwrites the same files once it
-  succeeds, and re-checks for renewal every 12 hours. `admin-nginx` reloads
-  itself every 6 hours to pick up a renewed certificate — postfix/dovecot
-  pick up a renewed one on their next restart (`docker compose restart
-  postfix dovecot` after a renewal if you want it sooner; TLS libraries
-  there don't hot-reload certs).
-- If `APP_DOMAIN` isn't a real, publicly-reachable domain (e.g. local
-  testing), certbot logs a warning and the self-signed certificate stays in
-  place — everything still works, browsers/mail clients will just warn about
-  the certificate.
-- Set `CERTBOT_STAGING=true` while testing against a real domain to avoid
-  hitting Let's Encrypt's production rate limits.
+```bash
+docker compose restart postfix dovecot
+```
+
+A certbot deploy hook is a convenient place for this command.
 
 ## Cloudflare DNS sync (optional)
 
-If a domain's DNS is hosted on Cloudflare, the admin panel can create/update
-its MX, SPF, DKIM and DMARC records for you (Domains → click a domain name →
-"Sync DNS via Cloudflare"). It never touches the PTR record or anything
-outside those four records, and never creates zones — the domain must already
-exist in your Cloudflare account.
+If a domain's DNS is hosted on Cloudflare, the panel can publish its mail DNS records for you. Open **Domains**, click a domain, then **Sync DNS via Cloudflare**. Without a token the button is disabled and you set DNS by hand (see "Required DNS records").
 
-Setup:
+### What it changes
 
-1. Create a Cloudflare API token at <https://dash.cloudflare.com/profile/api-tokens>
-   with **Zone → DNS → Edit** permission, scoped to the zones you want this
-   stack to manage.
-2. Set `CLOUDFLARE_API_TOKEN` in `.env` and `docker compose up -d admin-php`.
-3. The "Sync DNS via Cloudflare" button appears once a token is set; without
-   one it's disabled and DNS stays something you configure by hand (see
-   above).
+For the selected domain `example.com` it creates the record if it does not exist, otherwise it **overwrites the first existing record of the same type and name**:
 
-## Notes / limitations
+| Record | Name | Value |
+|---|---|---|
+| MX | `example.com` | `APP_DOMAIN`, priority 10 |
+| TXT (SPF) | `example.com` | `v=spf1 mx ~all` |
+| TXT (DKIM) | `mail._domainkey.example.com` | `v=DKIM1; k=rsa; p=<public key of the domain>` |
+| TXT (DMARC) | `_dmarc.example.com` | `v=DMARC1; p=quarantine; rua=mailto:postmaster@example.com` |
 
-- **Local testing quirk**: rspamd treats mail originating from RFC1918/local
-  addresses as trusted and skips most checks (SPF/DKIM verification, spam
-  headers) for it — this is standard rspamd behavior, not a bug. When testing
-  from your own machine through Docker's port forwarding, the apparent client
-  IP is often a private address, so you won't see `X-Spam-*` /
-  `Authentication-Results` headers on self-addressed test mail. Real inbound
-  mail from the public internet is scored and tagged normally.
-- **rspamd web UI** (score/history/training) is not exposed by default. To
-  use it: set a password with `docker compose exec rspamd rspamadm pw` and
-  expose port 11334 for `rspamd` in `docker-compose.yml`.
-- **Backups**: `pgdata` and `vmail` need backing up for disaster recovery
-  (mail routing state + actual mail). `dkim` also matters — losing it means
-  re-adding domains generates new DKIM keys, invalidating the DNS records you
-  published. `letsencrypt` is nice to keep too (avoids re-issuing on
-  restore) but is reconstructible by certbot if lost.
-- The webmail page is an admin convenience (log in with any mailbox's own
-  credentials, nothing is stored beyond an encrypted session value) — it is
-  not a general end-user self-service portal with its own accounts/ACLs.
-- Cloudflare sync only manages MX/SPF/DKIM/DMARC for each mail *domain*'s own
-  zone. The `APP_DOMAIN` A/AAAA record (the mail server's own IP) and the PTR
-  record are not automated — set those once by hand (see DNS records above).
-  The Cloudflare API calls themselves are implemented against the documented
-  v4 REST API but haven't been exercised against a live Cloudflare account in
-  this repo's testing — try it on one domain first before relying on it.
+All records get TTL 3600. It never creates zones, never deletes records and never touches the PTR record or the A/AAAA record of `APP_DOMAIN`.
+
+> **Check before you run it on a live domain.** The match is by type and name only. If the apex of `example.com` already has several TXT records (site verification, another SPF) or an MX from another provider, the first one found is replaced. Back up the zone first (Cloudflare, DNS, Records, Export) and try it on a test domain.
+
+### API token permissions
+
+Create a **custom API token**, not the Global API Key.
+
+1. Open <https://dash.cloudflare.com/profile/api-tokens>, then **Create Token**, then **Create Custom Token**.
+2. Add exactly these permissions:
+
+   | Resource type | Resource | Access | Used for |
+   |---|---|---|---|
+   | Zone | Zone | **Read** | Finding the zone by domain name (`GET /zones?name=`) |
+   | Zone | DNS | **Edit** | Listing, creating and updating records (`/zones/{id}/dns_records`) |
+
+3. Under **Zone Resources** choose **Include, Specific zone** and select only the domains this stack serves. Use "All zones" only if you really manage everything from here.
+4. Optional but recommended: restrict **Client IP Address Filtering** to your server's IP and set a TTL (expiry date) you will remember to renew.
+5. Create the token, copy it once and put it in `admin/.env`:
+
+   ```env
+   CLOUDFLARE_API_TOKEN=your-token
+   ```
+
+6. Reload the panel configuration (`php artisan config:clear`, or restart php-fpm if config is cached).
+
+Only **Zone Read** plus **DNS Edit** are needed. Do not add Account, SSL, Firewall or Workers permissions. "DNS Read" alone is not enough because the panel writes records.
+
+### Verify the token
+
+```bash
+curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  https://api.cloudflare.com/client/v4/user/tokens/verify
+```
+
+`"status":"active"` means the token is valid. To check that it sees your zone:
+
+```bash
+curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/zones?name=example.com"
+```
+
+The response must contain one item in `result`.
+
+### Requirements and common errors
+
+- The domain must already be a zone in your Cloudflare account and the zone name must be exactly the mail domain. A mail domain like `mail.example.com` that lives inside the `example.com` zone is not found, because the lookup is by the exact name.
+- `No Cloudflare zone found for ...`: the zone is not in the account, the token is not scoped to it, or the token lacks **Zone Read**.
+- `Authentication error` or HTTP 403: the token lacks **DNS Edit** for that zone, or it is expired or IP-restricted to a different address.
+- `Cloudflare is not configured`: `CLOUDFLARE_API_TOKEN` is empty in `admin/.env` or the config is cached.
+- The request goes through the public Cloudflare v4 API but was not tested against a live account in this repository, so try one domain first.
+
+## Time zone
+
+Dates in the UI, reports and CSV files use `APP_TIMEZONE` from `admin/.env` (default `UTC`). The time picked in "Send later" is converted from the browser's time zone, so it is independent of this setting.
+
+## Security notes
+
+- `DOVECOT_MASTER_PASSWORD` logs in as any mailbox, over IMAP as well. Keep it long and secret, and rotate it if it leaks.
+- Postgres is published on loopback only. Redis is not published at all.
+- Webmail renders received HTML as is, without a sanitizer. Treat the webmail page as an admin tool for trusted mailboxes until that is added.
+- Webmail keeps the mailbox password only in an encrypted session value. Scheduled sending does not store passwords, it authenticates through the master user.
+- "Sign in with Google" only works for an existing admin account with the same email and never creates users.
+- The mail ports are open to the internet by design, so keep the host patched and consider fail2ban for Dovecot and Postfix.
+
+## Notes and limitations
+
+- **Local testing**: rspamd trusts private addresses and skips most checks for them, so self-addressed test mail often lacks `X-Spam-*` and `Authentication-Results` headers.
+- **rspamd web UI** is not exposed. To use it, set a password with `docker compose exec rspamd rspamadm pw` and publish port 11334.
+- **Backups**: back up the `pgdata` and `vmail` volumes and `docker/data/dkim`. Losing the DKIM keys means new keys and new DNS records.
+- **Analytics** are built from the admin database (domains, mailboxes, aliases, scheduled mail). Message traffic and real disk usage are not tracked.
+- Draft attachments are not stored with the draft.
+- The webmail is an admin convenience, not a self-service portal with its own accounts.

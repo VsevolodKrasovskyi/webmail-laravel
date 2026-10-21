@@ -19,6 +19,12 @@ class DatabaseSeeder extends Seeder
             return;
         }
 
+        if ($password === 'change-me' || strlen($password) < 10) {
+            $this->command?->error('ADMIN_PASSWORD is a placeholder or shorter than 10 characters, no admin created.');
+
+            return;
+        }
+
         User::updateOrCreate(
             ['email' => $email],
             [

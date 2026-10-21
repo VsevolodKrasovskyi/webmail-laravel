@@ -11,6 +11,12 @@ set -e
 
 export DB_HOST DB_PORT DB_DATABASE DB_USERNAME DB_PASSWORD DOVECOT_MASTER_PASSWORD APP_DOMAIN
 
+# The master password logs in as ANY mailbox, so never run with the example value.
+if [ "$DOVECOT_MASTER_PASSWORD" = "change-me" ] || [ "$DB_PASSWORD" = "change-me" ]; then
+    echo "Refusing to start: set real values for DB_PASSWORD and DOVECOT_MASTER_PASSWORD in .env (not \"change-me\")." >&2
+    exit 1
+fi
+
 echo "Waiting for PostgreSQL at ${DB_HOST}:${DB_PORT}..."
 until nc -z "${DB_HOST}" "${DB_PORT}" >/dev/null 2>&1; do
     sleep 1

@@ -11,6 +11,11 @@ set -e
 
 export DB_HOST DB_PORT DB_DATABASE DB_USERNAME DB_PASSWORD APP_DOMAIN MAIL_DOMAIN
 
+if [ "$DB_PASSWORD" = "change-me" ]; then
+    echo "Refusing to start: set a real DB_PASSWORD in .env (not \"change-me\")." >&2
+    exit 1
+fi
+
 echo "Waiting for PostgreSQL at ${DB_HOST}:${DB_PORT}..."
 until nc -z "${DB_HOST}" "${DB_PORT}" >/dev/null 2>&1; do
     sleep 1
