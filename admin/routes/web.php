@@ -7,7 +7,6 @@ use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DomainController;
 use App\Http\Controllers\MailboxController;
-use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\WebmailController;
 use Illuminate\Support\Facades\Route;
 
@@ -26,9 +25,6 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/analytics', [AnalyticsController::class, 'index'])->name('analytics');
     Route::get('/analytics/export/{type}', [AnalyticsController::class, 'export'])->name('analytics.export');
-
-    Route::get('/settings', [SettingsController::class, 'edit'])->name('settings');
-    Route::put('/settings/profile', [SettingsController::class, 'updateProfile'])->name('settings.profile');
 
     Route::resource('domains', DomainController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::post('/domains/{domain}/dns', [DomainController::class, 'syncDns'])->name('domains.dns');

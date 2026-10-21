@@ -9,7 +9,6 @@ import {
     ArrowRightLeftIcon,
     InboxIcon,
     LogOutIcon,
-    SettingsIcon,
     ChartColumnIcon,
 } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
@@ -98,12 +97,6 @@ function initials(email) {
                             {{ page.props.auth.user?.email }}
                         </DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        <Link href="/settings">
-                            <DropdownMenuItem class="gap-2">
-                                <SettingsIcon class="size-4" />
-                                Settings
-                            </DropdownMenuItem>
-                        </Link>
                         <DropdownMenuItem class="gap-2" @click="logout">
                             <LogOutIcon class="size-4" />
                             Log out
