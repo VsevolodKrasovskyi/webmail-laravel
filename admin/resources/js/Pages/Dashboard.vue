@@ -15,6 +15,8 @@ import AppLayout from '../Layouts/AppLayout.vue';
 import BarChart from '@/components/BarChart.vue';
 import MailboxAvatar from '@/components/MailboxAvatar.vue';
 import { fetchJson } from '../fetchJson';
+import PagerBar from '@/components/PagerBar.vue';
+import { usePager } from '@/lib/usePager';
 import { Card, CardHeader, CardTitle, CardDescription, CardAction, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -64,6 +66,11 @@ onMounted(() => {
 onBeforeUnmount(() => clearInterval(timer));
 
 const unreadTotal = computed(() => live.value?.unread_total ?? 0);
+
+// Both tables show 5 rows per page by default, and the size can be changed. All mailboxes are still
+// read (the totals above need every one), the pages only split the table.
+const mailboxPager = usePager(computed(() => live.value?.mailboxes ?? []), 5);
+const domainPager = usePager(computed(() => props.domains), 5);
 
 // ---- Header ----
 const user = computed(() => page.props.auth.user);
@@ -260,7 +267,7 @@ function formatQuota(mb) {
                         <p v-else-if="! live" class="py-6 text-center text-sm text-muted-foreground">Reading mailboxes...</p>
                         <p v-else-if="! live.mailboxes.length" class="py-6 text-center text-sm text-muted-foreground">No active mailboxes yet.</p>
                         <div v-else class="divide-y sm:hidden">
-                            <div v-for="row in live.mailboxes" :key="row.id" class="flex items-center gap-3 py-3">
+                            <div v-for="row in mailboxPager.items.value" :key="row.id" class="flex items-center gap-3 py-3">
                                 <MailboxAvatar :email="row.email" :name="row.name" size="sm" />
                                 <div class="min-w-0 flex-1">
                                     <p class="break-all text-sm font-medium">{{ row.email }}</p>
@@ -289,7 +296,7 @@ function formatQuota(mb) {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                <TableRow v-for="row in live.mailboxes" :key="row.id">
+                                <TableRow v-for="row in mailboxPager.items.value" :key="row.id">
                                     <TableCell>
                                         <div class="flex items-center gap-3">
                                             <MailboxAvatar :email="row.email" :name="row.name" size="sm" />
@@ -322,6 +329,7 @@ function formatQuota(mb) {
                                 </TableRow>
                             </TableBody>
                         </Table>
+                        <PagerBar v-if="live" :pager="mailboxPager" />
                     </CardContent>
                 </Card>
 
@@ -403,7 +411,7 @@ function formatQuota(mb) {
                 <CardContent>
                     <div class="divide-y sm:hidden">
                         <p v-if="! domains.length" class="py-6 text-center text-sm text-muted-foreground">No domains yet.</p>
-                        <div v-for="d in domains" :key="d.name" class="py-3">
+                        <div v-for="d in domainPager.items.value" :key="d.name" class="py-3">
                             <div class="flex items-start justify-between gap-3">
                                 <p class="break-all text-sm font-medium">{{ d.name }}</p>
                                 <Badge class="shrink-0" :variant="d.is_active ? 'secondary' : 'outline'">{{ d.is_active ? 'active' : 'inactive' }}</Badge>
@@ -426,7 +434,7 @@ function formatQuota(mb) {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            <TableRow v-for="d in domains" :key="d.name">
+                            <TableRow v-for="d in domainPager.items.value" :key="d.name">
                                 <TableCell class="font-medium">{{ d.name }}</TableCell>
                                 <TableCell class="text-right tabular-nums">{{ d.mailboxes }}</TableCell>
                                 <TableCell class="text-right tabular-nums">{{ d.aliases }}</TableCell>
@@ -441,6 +449,7 @@ function formatQuota(mb) {
                             </TableRow>
                         </TableBody>
                     </Table>
+                    <PagerBar :pager="domainPager" />
                 </CardContent>
             </Card>
         </div>
