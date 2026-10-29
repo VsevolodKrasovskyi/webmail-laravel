@@ -1,42 +1,41 @@
 <script setup>
-import { Head } from '@inertiajs/vue3';
 import WebmailController from '@/actions/App/Http/Controllers/WebmailController';
-import { ref, watch, onBeforeUnmount } from 'vue';
-import { Link } from '@inertiajs/vue3';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { toast } from 'vue-sonner';
-import { ArrowLeftIcon, PaperclipIcon, XIcon, SendIcon, SaveIcon, CalendarClockIcon } from '@lucide/vue';
-import AppLayout from '../../Layouts/AppLayout.vue';
-import { fetchJson } from '../../fetchJson';
+import { PaperclipIcon, XIcon, SendIcon, SaveIcon, CalendarClockIcon } from '@lucide/vue';
+import { fetchJson } from '../fetchJson';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import RecipientInput from '@/components/RecipientInput.vue';
 import RichTextEditor from '@/components/RichTextEditor.vue';
 
+// Mounted fresh for every message (the parent keys it), so the form always starts from `initial`.
 const props = defineProps({
-    to: { type: String, default: '' },
-    subject: { type: String, default: '' },
-    body: { type: String, default: '' },
-    cc: { type: Array, default: () => [] },
-    bcc: { type: Array, default: () => [] },
-    inReplyTo: { type: String, default: null },
-    draftId: { type: String, default: null },
+    // { to, subject, body, cc, bcc, inReplyTo, draftId } from WebmailController@compose
+    initial: { type: Object, default: () => ({}) },
     canSchedule: { type: Boolean, default: false },
 });
 
-const to = ref(props.to);
-const ccList = ref([...props.cc]);
-const bccList = ref([...props.bcc]);
-const showCc = ref(props.cc.length > 0);
-const showBcc = ref(props.bcc.length > 0);
+// close: the dialog is gone; sent: a message went out or was scheduled, so the list is stale;
+// draft: a draft was saved, which also changes the Drafts folder.
+const emit = defineEmits(['close', 'sent', 'draft']);
+
+const to = ref(props.initial.to ?? '');
+const ccList = ref([...(props.initial.cc ?? [])]);
+const bccList = ref([...(props.initial.bcc ?? [])]);
+const showCc = ref(ccList.value.length > 0);
+const showBcc = ref(bccList.value.length > 0);
 const ccRef = ref(null);
 const bccRef = ref(null);
-const subject = ref(props.subject);
-const body = ref(props.body);
+const subject = ref(props.initial.subject ?? '');
+const body = ref(props.initial.body ?? '');
+const inReplyTo = props.initial.inReplyTo ?? null;
 const attachments = ref([]);
 const sending = ref(false);
-const draftId = ref(props.draftId);
+const draftId = ref(props.initial.draftId ?? null);
 const savingDraft = ref(false);
 const draftSavedAt = ref(null);
 const scheduling = ref(false);
@@ -50,6 +49,15 @@ function localInputValue(date) {
 
 const minSendAt = () => localInputValue(new Date(Date.now() + 60_000));
 
+const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const now = ref(new Date());
+const clock = setInterval(() => { now.value = new Date(); }, 15_000);
+
+const currentTime = computed(() => now.value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+const scheduledFor = computed(() => sendAt.value
+    ? new Date(sendAt.value).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : null);
+
 function openScheduler() {
     if (! sendAt.value) {
         const tomorrow = new Date();
@@ -60,7 +68,7 @@ function openScheduler() {
     scheduling.value = ! scheduling.value;
 }
 
-let lastSaved = JSON.stringify([props.to, props.subject, props.body, props.cc, props.bcc]);
+let lastSaved = JSON.stringify([to.value, subject.value, body.value, ccList.value, bccList.value]);
 let autosaveTimer;
 
 function draftSnapshot() {
@@ -104,13 +112,14 @@ async function saveDraft({ silent = false } = {}) {
                 bcc: bccList.value,
                 subject: subject.value,
                 body: body.value,
-                in_reply_to: props.inReplyTo,
+                in_reply_to: inReplyTo,
                 draft_id: draftId.value,
             },
         });
         draftId.value = data.draft_id;
         lastSaved = snapshot;
         draftSavedAt.value = new Date();
+        emit('draft');
         if (! silent) toast.success('Draft saved');
     } catch (e) {
         if (! silent) toast.error(e.message);
@@ -126,7 +135,10 @@ watch([to, subject, body, ccList, bccList], () => {
     autosaveTimer = setTimeout(() => saveDraft({ silent: true }), 5000);
 }, { deep: true });
 
-onBeforeUnmount(() => clearTimeout(autosaveTimer));
+onBeforeUnmount(() => {
+    clearTimeout(autosaveTimer);
+    clearInterval(clock);
+});
 
 // Closing a recipient row also drops its addresses, so nothing hidden is ever sent.
 function closeCc() {
@@ -181,7 +193,7 @@ async function buildPayload() {
         bcc: bccList.value,
         subject: subject.value,
         body: body.value,
-        in_reply_to: props.inReplyTo,
+        in_reply_to: inReplyTo,
         draft_id: draftId.value,
         attachments: encodedAttachments,
     };
@@ -195,7 +207,8 @@ async function schedule() {
         payload.send_at = new Date(sendAt.value).toISOString();
         await fetchJson(WebmailController.schedule(), { body: payload });
         toast.success('Message scheduled');
-        window.location.href = WebmailController.index.url();
+        emit('sent');
+        emit('close');
     } catch (e) {
         toast.error(e.message);
     } finally {
@@ -209,31 +222,44 @@ async function send() {
     try {
         await fetchJson(WebmailController.send(), { body: await buildPayload() });
         toast.success('Message sent');
-        window.location.href = WebmailController.index.url();
+        emit('sent');
+        emit('close');
     } catch (e) {
         toast.error(e.message);
     } finally {
         sending.value = false;
     }
 }
+
+function close() {
+    if (sending.value) return;
+    emit('close');
+}
 </script>
 
 <template>
-    <AppLayout>
-        <Head title="New message" />
-        <div class="mx-auto w-full max-w-3xl">
-            <div class="mb-4 flex items-center gap-3">
-                <Link :href="WebmailController.index.url()" class="rounded-full p-2 text-muted-foreground transition hover:bg-accent" aria-label="Back to webmail">
-                    <ArrowLeftIcon class="size-4" />
-                </Link>
-                <h2 class="text-xl font-semibold tracking-tight">{{ inReplyTo ? 'Reply' : 'New message' }}</h2>
+    <Dialog :open="true" @update:open="(open) => { if (! open) close(); }">
+        <!-- Esc and clicks outside are ignored on purpose: a stray key or click must not throw away a message. -->
+        <DialogContent
+            :show-close-button="false"
+            class="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl"
+            @escape-key-down.prevent
+            @pointer-down-outside.prevent
+            @interact-outside.prevent
+        >
+            <div class="flex items-center gap-3 border-b px-4 py-3">
+                <DialogTitle class="text-base font-semibold">{{ inReplyTo ? 'Reply' : 'New message' }}</DialogTitle>
+                <DialogDescription class="sr-only">Write and send a message from this mailbox.</DialogDescription>
                 <p class="ml-auto text-xs text-muted-foreground">
                     <template v-if="savingDraft">Saving...</template>
                     <template v-else-if="draftSavedAt">Draft saved {{ draftSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</template>
                 </p>
+                <Button variant="ghost" size="icon-sm" title="Close" aria-label="Close" :disabled="sending" @click="close">
+                    <XIcon class="size-4" />
+                </Button>
             </div>
 
-            <div class="overflow-hidden rounded-2xl border bg-card shadow-sm">
+            <div class="min-h-0 flex-1 overflow-y-auto">
                 <div class="flex items-center gap-3 border-b px-4 py-1.5">
                     <label for="compose-to" class="w-14 shrink-0 text-sm text-muted-foreground">To<span class="ml-0.5 text-destructive" aria-hidden="true">*</span></label>
                     <input
@@ -321,33 +347,36 @@ async function send() {
                             <CalendarClockIcon class="size-4" />
                             {{ sending ? 'Scheduling...' : 'Schedule send' }}
                         </Button>
-                        <p class="basis-full text-xs text-muted-foreground">Sent from your mailbox by the server at that time (your local time zone).</p>
-                    </div>
-                </div>
-
-                <div class="flex items-center justify-between gap-2 border-t bg-muted/20 px-3 py-3 sm:px-4">
-                    <Button :disabled="sending" class="gap-2 rounded-full px-5" @click="send">
-                        <SendIcon class="size-4" />
-                        {{ sending ? 'Sending...' : 'Send' }}
-                    </Button>
-                    <div class="flex items-center gap-1">
-                        <Button v-if="canSchedule" variant="ghost" size="sm" :disabled="sending" class="gap-2" title="Send later" @click="validate() && openScheduler()">
-                            <CalendarClockIcon class="size-4" />
-                            <span class="hidden sm:inline">Send later</span>
-                        </Button>
-                        <Button variant="ghost" size="sm" :disabled="savingDraft || sending" class="gap-2" title="Save draft" @click="saveDraft()">
-                            <SaveIcon class="size-4" />
-                            <span class="hidden sm:inline">Save draft</span>
-                        </Button>
-                        <Link :href="WebmailController.index.url()">
-                            <Button variant="ghost" size="sm" title="Close">
-                                <XIcon class="size-4" />
-                                <span class="hidden sm:inline">Close</span>
-                            </Button>
-                        </Link>
+                        <dl class="flex basis-full flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+                            <div class="flex gap-1">
+                                <dt>Current time zone:</dt>
+                                <dd class="text-foreground">{{ timeZone }}, {{ currentTime }}</dd>
+                            </div>
+                            <div v-if="scheduledFor" class="flex gap-1">
+                                <dt>Scheduled for:</dt>
+                                <dd class="font-medium text-foreground">{{ scheduledFor }}</dd>
+                            </div>
+                        </dl>
                     </div>
                 </div>
             </div>
-        </div>
-    </AppLayout>
+
+            <div class="flex items-center justify-between gap-2 border-t bg-muted/20 px-3 py-3 sm:px-4">
+                <Button :disabled="sending" class="gap-2 rounded-full px-5" @click="send">
+                    <SendIcon class="size-4" />
+                    {{ sending ? 'Sending...' : 'Send' }}
+                </Button>
+                <div class="flex items-center gap-1">
+                    <Button v-if="canSchedule" variant="ghost" size="sm" :disabled="sending" class="gap-2" title="Send later" @click="validate() && openScheduler()">
+                        <CalendarClockIcon class="size-4" />
+                        <span class="hidden sm:inline">Send later</span>
+                    </Button>
+                    <Button variant="ghost" size="sm" :disabled="savingDraft || sending" class="gap-2" title="Save draft" @click="saveDraft()">
+                        <SaveIcon class="size-4" />
+                        <span class="hidden sm:inline">Save draft</span>
+                    </Button>
+                </div>
+            </div>
+        </DialogContent>
+    </Dialog>
 </template>

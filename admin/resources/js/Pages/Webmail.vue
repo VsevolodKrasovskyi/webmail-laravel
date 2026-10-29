@@ -2,7 +2,7 @@
 import { Head } from '@inertiajs/vue3';
 import WebmailController from '@/actions/App/Http/Controllers/WebmailController';
 import MailboxController from '@/actions/App/Http/Controllers/MailboxController';
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, defineAsyncComponent } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
 import { toast } from 'vue-sonner';
 import {
@@ -11,6 +11,8 @@ import {
     EraserIcon, PaperclipIcon, ArrowLeftIcon, FileTextIcon, ClockIcon, LayersIcon, XCircleIcon,
 } from '@lucide/vue';
 import AppLayout from '../Layouts/AppLayout.vue';
+// Loaded on first use: it pulls in the rich text editor, which the inbox itself does not need.
+const ComposeDialog = defineAsyncComponent(() => import('@/components/ComposeDialog.vue'));
 import { fetchJson } from '../fetchJson';
 import { sanitizeEmail } from '@/lib/sanitizeEmail';
 import { avatarClass } from '@/lib/avatar';
@@ -18,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import NativeSelect from '@/components/NativeSelect.vue';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -29,6 +31,7 @@ import {
 
 defineProps({
     email: String,
+    canSchedule: Boolean,
 });
 
 const FOLDER_ICONS = {
@@ -322,7 +325,7 @@ async function openThread(item) {
     const folder = item.folder ?? currentFolder.value;
 
     if (folder === 'Drafts') {
-        router.visit(WebmailController.compose({ query: { draft_uid: uid } }));
+        openCompose({ draft_uid: uid });
         return;
     }
 
@@ -387,14 +390,38 @@ async function confirmDeleteMessage() {
     }
 }
 
-function replyHref() {
-    const last = thread.value?.at(-1);
-    if (! last) {
-        return WebmailController.compose.url();
+// The compose dialog. `compose` holds its prefill while it is open; a new key per
+// message remounts it, so every message starts from a clean form.
+const compose = ref(null);
+const openingCompose = ref(false);
+let composeKey = 0;
+
+async function openCompose(query = null) {
+    if (! query) {
+        compose.value = { key: ++composeKey };
+        return;
     }
-    return WebmailController.compose.url({
-        query: { quote_uid: last.uid, quote_folder: last.folder ?? currentFolder.value },
-    });
+    if (openingCompose.value) return;
+    openingCompose.value = true;
+    try {
+        const data = await fetchJson(WebmailController.compose({ query }));
+        compose.value = { ...data, key: ++composeKey };
+    } catch (e) {
+        toast.error(e.message);
+    } finally {
+        openingCompose.value = false;
+    }
+}
+
+function closeCompose() {
+    const draftSaved = compose.value?.draftSaved;
+    compose.value = null;
+    if (draftSaved) loadMessages();
+}
+
+function reply() {
+    const last = thread.value?.at(-1);
+    openCompose(last ? { quote_uid: last.uid, quote_folder: last.folder ?? currentFolder.value } : null);
 }
 
 onMounted(() => {
@@ -421,12 +448,10 @@ onMounted(() => {
                         <RefreshCwIcon class="size-4" />
                         <span class="hidden sm:inline">Refresh</span>
                     </Button>
-                    <Link :href="WebmailController.compose.url()">
-                        <Button size="sm" class="gap-2 rounded-full px-4">
-                            <PenSquareIcon class="size-4" />
-                            Compose
-                        </Button>
-                    </Link>
+                    <Button size="sm" class="gap-2 rounded-full px-4" @click="openCompose()">
+                        <PenSquareIcon class="size-4" />
+                        Compose
+                    </Button>
                     <Button variant="ghost" size="sm" @click="logout">
                         <LogOutIcon class="size-4" />
                         <span class="hidden sm:inline">Sign out</span>
@@ -502,10 +527,15 @@ onMounted(() => {
                             <SearchIcon class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                             <Input v-model="search" placeholder="Search mail" class="h-9 rounded-full bg-muted/50 pl-9 text-sm border-transparent" />
                         </div>
-                        <NativeSelect v-model="sortOrder" class="h-9 w-24 rounded-full text-xs">
-                            <option value="newest">Newest</option>
-                            <option value="oldest">Oldest</option>
-                        </NativeSelect>
+                        <Select v-model="sortOrder">
+                            <SelectTrigger class="w-24 rounded-full text-xs" aria-label="Sort order">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="newest">Newest</SelectItem>
+                                <SelectItem value="oldest">Oldest</SelectItem>
+                            </SelectContent>
+                        </Select>
                         <Button
                             v-if="currentFolder === 'Trash' || currentFolder === 'Junk'"
                             variant="ghost"
@@ -597,12 +627,10 @@ onMounted(() => {
                                 <XCircleIcon class="size-4" />
                                 Cancel sending
                             </Button>
-                            <Link v-else :href="replyHref()">
-                                <Button variant="outline" size="sm" class="shrink-0 gap-2 rounded-full">
-                                    <ReplyIcon class="size-4" />
-                                    Reply
-                                </Button>
-                            </Link>
+                            <Button v-else variant="outline" size="sm" class="shrink-0 gap-2 rounded-full" :disabled="openingCompose" @click="reply">
+                                <ReplyIcon class="size-4" />
+                                Reply
+                            </Button>
                         </div>
 
                         <div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-2 sm:p-4">
@@ -729,5 +757,15 @@ onMounted(() => {
                 <span class="truncate text-muted-foreground">{{ dragItem.subject }}</span>
             </div>
         </Transition>
+
+        <ComposeDialog
+            v-if="compose"
+            :key="compose.key"
+            :initial="compose"
+            :can-schedule="canSchedule"
+            @close="closeCompose"
+            @sent="loadMessages"
+            @draft="compose.draftSaved = true"
+        />
     </AppLayout>
 </template>

@@ -32,15 +32,20 @@ class WebmailController extends Controller
 
         return Inertia::render('Webmail', [
             'email' => $credentials['email'],
+            'canSchedule' => filled(config('mail_server.dovecot_master_password')),
         ]);
     }
 
-    public function compose(Request $request): Response|RedirectResponse
+    /**
+     * Prefill for the compose dialog: a draft to continue (draft_uid) or a
+     * reply quoting the last message of a thread (quote_uid, quote_folder).
+     */
+    public function compose(Request $request): JsonResponse
     {
         $credentials = $this->credentials($request);
 
         if (! $credentials) {
-            return redirect('/mailboxes');
+            return response()->json(['error' => 'not_connected'], 401);
         }
 
         $to = (string) $request->query('to', '');
@@ -64,7 +69,7 @@ class WebmailController extends Controller
                 $inReplyTo = $draft['in_reply_to'];
                 $draftId = $draft['draft_id'];
             } catch (Throwable) {
-                // Fall back to a blank compose rather than blocking the page.
+                // Fall back to a blank compose rather than blocking the dialog.
             }
         }
 
@@ -85,11 +90,11 @@ class WebmailController extends Controller
                     $inReplyTo = $last['message_id'];
                 }
             } catch (Throwable) {
-                // Fall back to a blank compose rather than blocking the page.
+                // Fall back to a blank compose rather than blocking the dialog.
             }
         }
 
-        return Inertia::render('Webmail/Compose', [
+        return response()->json([
             'to' => $to,
             'subject' => $subject,
             'body' => $body,
@@ -97,7 +102,6 @@ class WebmailController extends Controller
             'bcc' => $bcc,
             'inReplyTo' => $inReplyTo,
             'draftId' => $draftId,
-            'canSchedule' => filled(config('mail_server.dovecot_master_password')),
         ]);
     }
 
