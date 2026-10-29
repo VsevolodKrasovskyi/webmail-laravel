@@ -8,7 +8,6 @@ import AppLayout from '../../Layouts/AppLayout.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import Pagination from '@/components/Pagination.vue';
 import SortableHeader from '@/components/SortableHeader.vue';
@@ -159,9 +158,6 @@ function confirmDelete() {
                         <TableCell>
                             <div class="flex items-center gap-2">
                                 <Switch :model-value="alias.is_active" @update:model-value="toggleActive(alias)" />
-                                <Badge class="hidden sm:inline-flex" :variant="alias.is_active ? 'default' : 'secondary'">
-                                    {{ alias.is_active ? 'Active' : 'Disabled' }}
-                                </Badge>
                             </div>
                         </TableCell>
                         <TableCell class="text-right">

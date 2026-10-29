@@ -1,8 +1,9 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
 import WebmailController from '@/actions/App/Http/Controllers/WebmailController';
+import MailboxController from '@/actions/App/Http/Controllers/MailboxController';
 import { ref, computed, watch, onMounted } from 'vue';
-import { Link, useForm, router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { toast } from 'vue-sonner';
 import {
     PenSquareIcon, RefreshCwIcon, LogOutIcon, ReplyIcon, Trash2Icon, FolderPlusIcon, FolderIcon,
@@ -12,12 +13,12 @@ import {
 import AppLayout from '../Layouts/AppLayout.vue';
 import { fetchJson } from '../fetchJson';
 import { sanitizeEmail } from '@/lib/sanitizeEmail';
+import { avatarClass } from '@/lib/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import NativeSelect from '@/components/NativeSelect.vue';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -26,8 +27,7 @@ import {
     AlertDialogDescription, AlertDialogFooter, AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
 
-const props = defineProps({
-    connected: Boolean,
+defineProps({
     email: String,
 });
 
@@ -48,10 +48,6 @@ const OUTGOING = ['Sent', 'Drafts', SCHEDULED];
 function folderIcon(path) {
     return FOLDER_ICONS[path] ?? FolderIcon;
 }
-
-const AVATAR_COLORS = [
-    'bg-rose-500', 'bg-amber-500', 'bg-emerald-500', 'bg-sky-500', 'bg-blue-500', 'bg-pink-500', 'bg-teal-500',
-];
 
 function extractEmail(address) {
     const match = address?.match(/<([^>]+)>/);
@@ -88,25 +84,11 @@ function initials(address) {
 }
 
 function avatarColor(address) {
-    const source = extractEmail(address) || address || '';
-    let hash = 0;
-    for (let i = 0; i < source.length; i++) {
-        hash = (hash * 31 + source.charCodeAt(i)) >>> 0;
-    }
-    return AVATAR_COLORS[hash % AVATAR_COLORS.length];
-}
-
-const loginForm = useForm({ email: '', password: '' });
-
-function login() {
-    loginForm.submit(WebmailController.login(), {
-        preserveScroll: true,
-        onSuccess: () => loginForm.reset('password'),
-    });
+    return avatarClass(extractEmail(address) || address);
 }
 
 function logout() {
-    loginForm.submit(WebmailController.logout());
+    router.post(WebmailController.logout());
 }
 
 const DEFAULT_FOLDERS = [{ name: 'INBOX', label: 'Inbox', standard: true }];
@@ -345,45 +327,24 @@ function replyHref() {
 }
 
 onMounted(() => {
-    if (props.connected) {
-        loadFolders();
-        loadMessages();
-    }
+    loadFolders();
+    loadMessages();
 });
 </script>
 
 <template>
     <AppLayout>
         <Head title="Webmail" />
-        <h2 class="mb-6 text-xl font-semibold">Webmail</h2>
-
-        <Card v-if="! connected" class="mx-auto max-w-md">
-            <CardHeader>
-                <CardTitle class="text-base">Sign in to a mailbox</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <form @submit.prevent="login" class="space-y-4">
-                    <div class="space-y-1.5">
-                        <Label for="wm-email">Email</Label>
-                        <Input id="wm-email" v-model="loginForm.email" type="email" placeholder="user@example.com" />
-                    </div>
-                    <div class="space-y-1.5">
-                        <Label for="wm-password">Password</Label>
-                        <Input id="wm-password" v-model="loginForm.password" type="password" />
-                        <p v-if="loginForm.errors.password" class="text-sm text-destructive">{{ loginForm.errors.password }}</p>
-                    </div>
-                    <Button type="submit" class="w-full" :disabled="loginForm.processing">
-                        {{ loginForm.processing ? 'Connecting...' : 'Sign in' }}
-                    </Button>
-                </form>
-            </CardContent>
-        </Card>
-
-        <div v-else>
+<div>
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2 sm:mb-4">
-                <p class="min-w-0 truncate text-sm text-muted-foreground">
-                    Signed in as <span class="font-medium text-foreground">{{ email }}</span>
-                </p>
+                <div class="flex min-w-0 items-center gap-2">
+                    <Link :href="MailboxController.index.url()" class="rounded-full p-2 text-muted-foreground transition hover:bg-accent" title="Back to mailboxes" aria-label="Back to mailboxes">
+                        <ArrowLeftIcon class="size-4" />
+                    </Link>
+                    <p class="min-w-0 truncate text-sm text-muted-foreground">
+                        Mailbox <span class="font-medium text-foreground">{{ email }}</span>
+                    </p>
+                </div>
                 <div class="flex gap-1 sm:gap-2">
                     <Button variant="ghost" size="sm" @click="loadMessages">
                         <RefreshCwIcon class="size-4" />

@@ -13,7 +13,6 @@ import {
     GlobeIcon,
     MailIcon,
     ArrowRightLeftIcon,
-    InboxIcon,
     LogOutIcon,
 } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
@@ -29,9 +28,9 @@ const page = usePage();
 const nav = [
     { href: DashboardController.url(), label: 'Dashboard', icon: LayoutDashboardIcon },
     { href: DomainController.index.url(), label: 'Domains', icon: GlobeIcon },
-    { href: MailboxController.index.url(), label: 'Mailboxes', icon: MailIcon },
+    // Webmail is opened from the Mailboxes list, so it keeps this item highlighted.
+    { href: MailboxController.index.url(), also: [WebmailController.index.url()], label: 'Mailboxes', icon: MailIcon },
     { href: AliasController.index.url(), label: 'Aliases', icon: ArrowRightLeftIcon },
-    { href: WebmailController.index.url(), label: 'Webmail', icon: InboxIcon },
 ];
 
 watch(
@@ -52,8 +51,10 @@ watch(
     },
 );
 
-function isActive(href) {
-    return page.url === href || page.url.startsWith(`${href}/`) || page.url.startsWith(`${href}?`);
+function isActive(item) {
+    return [item.href, ...(item.also ?? [])].some((href) => (
+        page.url === href || page.url.startsWith(`${href}/`) || page.url.startsWith(`${href}?`)
+    ));
 }
 
 function logout() {
@@ -70,7 +71,8 @@ function initials(email) {
 
 <template>
     <div class="min-h-screen bg-background text-foreground">
-        <Sonner position="top-center" rich-colors />
+        <!-- Plain (uncolored) toasts in the bottom right. On phones they sit above the bottom tab bar. -->
+        <Sonner position="bottom-right" :mobile-offset="{ bottom: '5.5rem' }" />
 
         <!-- Top bar: brand and account on phones, brand, navigation and account from md up -->
         <header class="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60">
@@ -88,7 +90,7 @@ function initials(email) {
                             variant="ghost"
                             size="sm"
                             class="gap-2"
-                            :class="{ 'bg-accent text-accent-foreground': isActive(item.href) }"
+                            :class="{ 'bg-accent text-accent-foreground': isActive(item) }"
                         >
                             <component :is="item.icon" class="size-4" />
                             {{ item.label }}
@@ -132,18 +134,18 @@ function initials(email) {
             class="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur supports-backdrop-filter:bg-background/80 md:hidden"
             aria-label="Main"
         >
-            <div class="grid grid-cols-5">
+            <div class="grid" :style="{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }">
                 <Link
                     v-for="item in nav"
                     :key="item.href"
                     :href="item.href"
                     class="flex flex-col items-center gap-1 px-1 pb-2 pt-2.5 text-[11px] font-medium transition-colors"
-                    :class="isActive(item.href) ? 'text-primary' : 'text-muted-foreground'"
-                    :aria-current="isActive(item.href) ? 'page' : undefined"
+                    :class="isActive(item) ? 'text-primary' : 'text-muted-foreground'"
+                    :aria-current="isActive(item) ? 'page' : undefined"
                 >
                     <span
                         class="flex h-7 w-12 items-center justify-center rounded-full transition-colors"
-                        :class="isActive(item.href) ? 'bg-accent' : ''"
+                        :class="isActive(item) ? 'bg-accent' : ''"
                     >
                         <component :is="item.icon" class="size-5" />
                     </span>

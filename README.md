@@ -138,7 +138,7 @@ Without it, messages queued with "Send later" are never sent. A message is retri
 1. **Domains**: add `example.com`. A 2048-bit DKIM key is generated, the private key is written to `docker/data/dkim` (read by rspamd) and the public key is shown under "DNS".
 2. **Mailboxes**: add `user@example.com` and a password. Postfix and Dovecot pick it up immediately.
 3. **Aliases**: `info@example.com` to `user@example.com`, or `@example.com` as a catch-all.
-4. **Webmail**: sign in with a mailbox's credentials, or use the inbox icon in the mailbox list.
+4. **Webmail**: press **Open** on a mailbox in the Mailboxes list (or on the dashboard). The panel signs in as that mailbox with the Dovecot master user, so no mailbox password is needed. There is no separate webmail login or mailbox picker page.
 
 ## Environment variables
 

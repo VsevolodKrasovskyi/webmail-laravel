@@ -3,12 +3,12 @@ import { Head } from '@inertiajs/vue3';
 import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import { ref, watch } from 'vue';
 import { useForm, router } from '@inertiajs/vue3';
-import { PlusIcon, Trash2Icon, CloudIcon } from '@lucide/vue';
+import { PlusIcon, Trash2Icon, CloudIcon, CopyIcon, CheckIcon } from '@lucide/vue';
+import { toast } from 'vue-sonner';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import Pagination from '@/components/Pagination.vue';
 import SortableHeader from '@/components/SortableHeader.vue';
@@ -88,6 +88,36 @@ function confirmDelete() {
 }
 
 const dnsDomain = ref(null);
+
+// Copy to the clipboard, with a fallback for pages served over plain HTTP.
+const copied = ref(null);
+let copiedTimer;
+
+async function copy(key, text) {
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            const area = document.createElement('textarea');
+            area.value = text;
+            area.style.position = 'fixed';
+            area.style.opacity = '0';
+            document.body.appendChild(area);
+            area.select();
+            document.execCommand('copy');
+            area.remove();
+        }
+        copied.value = key;
+        clearTimeout(copiedTimer);
+        copiedTimer = setTimeout(() => (copied.value = null), 1500);
+        toast.success('Copied');
+    } catch {
+        toast.error('Could not copy, select the text and copy it by hand');
+    }
+}
+
+const dkimName = (d) => `${d.dkim_selector}._domainkey.${d.name}`;
+const dkimValue = (d) => `v=DKIM1; k=rsa; p=${d.dkim_public_key}`;
 const syncing = ref(false);
 
 function syncDns(domain) {
@@ -165,9 +195,6 @@ function syncDns(domain) {
                         <TableCell>
                             <div class="flex items-center gap-2">
                                 <Switch :model-value="domain.is_active" @update:model-value="toggleActive(domain)" />
-                                <Badge class="hidden sm:inline-flex" :variant="domain.is_active ? 'default' : 'secondary'">
-                                    {{ domain.is_active ? 'Active' : 'Disabled' }}
-                                </Badge>
                             </div>
                         </TableCell>
                         <TableCell class="text-right">
@@ -203,11 +230,27 @@ function syncDns(domain) {
                     <DialogTitle>{{ dnsDomain.name }} — DNS</DialogTitle>
                     <DialogDescription>DKIM selector: {{ dnsDomain.dkim_selector }}</DialogDescription>
                 </DialogHeader>
-                <div class="space-y-1.5">
-                    <Label>TXT record for {{ dnsDomain.dkim_selector }}._domainkey.{{ dnsDomain.name }}</Label>
-                    <code class="block break-all rounded-md bg-muted p-3 text-xs">
-                        v=DKIM1; k=rsa; p={{ dnsDomain.dkim_public_key }}
-                    </code>
+                <div class="space-y-3">
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between gap-2">
+                            <Label>TXT record name</Label>
+                            <Button type="button" variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-xs" @click="copy('name', dkimName(dnsDomain))">
+                                <component :is="copied === 'name' ? CheckIcon : CopyIcon" class="size-3.5" />
+                                {{ copied === 'name' ? 'Copied' : 'Copy' }}
+                            </Button>
+                        </div>
+                        <code class="block break-all rounded-md bg-muted p-3 text-xs">{{ dkimName(dnsDomain) }}</code>
+                    </div>
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between gap-2">
+                            <Label>TXT record value</Label>
+                            <Button type="button" variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-xs" @click="copy('value', dkimValue(dnsDomain))">
+                                <component :is="copied === 'value' ? CheckIcon : CopyIcon" class="size-3.5" />
+                                {{ copied === 'value' ? 'Copied' : 'Copy' }}
+                            </Button>
+                        </div>
+                        <code class="block max-h-40 overflow-y-auto break-all rounded-md bg-muted p-3 text-xs">{{ dkimValue(dnsDomain) }}</code>
+                    </div>
                 </div>
                 <DialogFooter class="sm:justify-between sm:items-center">
                     <p v-if="! cloudflareEnabled" class="text-xs text-muted-foreground">

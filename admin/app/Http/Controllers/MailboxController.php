@@ -49,11 +49,21 @@ class MailboxController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        // Addresses are stored lowercase, so "Info@Example.com" and "info@example.com" are one mailbox.
+        $request->merge(['email' => Str::lower(trim((string) $request->input('email')))]);
+
         $data = $request->validate([
-            'email' => ['required', 'email', 'max:255', 'unique:mailboxes,email'],
+            'email' => [
+                'required', 'email', 'max:255',
+                // Plain local part only: letters, digits and . _ + - (no quotes, spaces or other tricks).
+                'regex:/^[a-z0-9](?:[a-z0-9._+-]*[a-z0-9])?@[a-z0-9.-]+$/',
+                'unique:mailboxes,email',
+            ],
             'password' => ['required', 'string', 'min:8'],
             'name' => ['nullable', 'string', 'max:255'],
             'quota_mb' => ['required', 'integer', 'min:1'],
+        ], [
+            'email.regex' => 'Use only letters, digits and . _ + - in the name before the @.',
         ]);
 
         $domainName = Str::lower(Str::afterLast($data['email'], '@'));

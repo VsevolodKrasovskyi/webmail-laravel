@@ -9,10 +9,11 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
 import {
     GlobeIcon, MailIcon, ArrowRightLeftIcon, BellIcon, RefreshCwIcon,
-    TriangleAlertIcon, ClockIcon, ExternalLinkIcon, HardDriveIcon, CircleCheckIcon, MailOpenIcon,
+    TriangleAlertIcon, ClockIcon, InboxIcon, HardDriveIcon, CircleCheckIcon, MailOpenIcon,
 } from '@lucide/vue';
 import AppLayout from '../Layouts/AppLayout.vue';
 import BarChart from '@/components/BarChart.vue';
+import MailboxAvatar from '@/components/MailboxAvatar.vue';
 import { fetchJson } from '../fetchJson';
 import { Card, CardHeader, CardTitle, CardDescription, CardAction, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -89,12 +90,12 @@ const cards = [
 const alerts = computed(() => {
     const a = props.attention;
     return [
-        { show: a.scheduled_failed > 0, tone: 'text-destructive', text: `${a.scheduled_failed} scheduled message(s) failed to send`, href: WebmailController.index.url() },
+        { show: a.scheduled_failed > 0, tone: 'text-destructive', text: `${a.scheduled_failed} scheduled message(s) failed to send`, href: MailboxController.index.url() },
         { show: a.without_dkim.length > 0, tone: 'text-amber-600 dark:text-amber-400', text: `No DKIM key: ${a.without_dkim.join(', ')}`, href: DomainController.index.url() },
         { show: a.without_mailboxes.length > 0, tone: 'text-amber-600 dark:text-amber-400', text: `No mailboxes: ${a.without_mailboxes.join(', ')}`, href: MailboxController.index.url() },
         { show: a.inactive_domains.length > 0, tone: 'text-muted-foreground', text: `Inactive domains: ${a.inactive_domains.join(', ')}`, href: DomainController.index.url() },
         { show: a.inactive_mailboxes > 0, tone: 'text-muted-foreground', text: `${a.inactive_mailboxes} inactive mailbox(es)`, href: MailboxController.index.url() },
-        { show: a.scheduled_pending > 0, tone: 'text-muted-foreground', text: `${a.scheduled_pending} message(s) waiting to be sent`, href: WebmailController.index.url() },
+        { show: a.scheduled_pending > 0, tone: 'text-muted-foreground', text: `${a.scheduled_pending} message(s) waiting to be sent`, href: MailboxController.index.url() },
     ].filter((x) => x.show);
 });
 
@@ -166,7 +167,7 @@ function formatQuota(mb) {
                     <div class="grid w-full grid-cols-2 gap-3 sm:w-auto">
                         <Link
                             v-if="canReadMail"
-                            :href="WebmailController.index.url()"
+                            :href="MailboxController.index.url()"
                             class="group flex items-center gap-3 rounded-xl border bg-background/60 px-4 py-3 backdrop-blur transition hover:bg-background/80"
                             :class="unreadTotal > 0 ? 'border-rose-500/40' : ''"
                             :title="liveError ?? 'Unread messages in all inboxes'"
@@ -260,6 +261,7 @@ function formatQuota(mb) {
                         <p v-else-if="! live.mailboxes.length" class="py-6 text-center text-sm text-muted-foreground">No active mailboxes yet.</p>
                         <div v-else class="divide-y sm:hidden">
                             <div v-for="row in live.mailboxes" :key="row.id" class="flex items-center gap-3 py-3">
+                                <MailboxAvatar :email="row.email" :name="row.name" size="sm" />
                                 <div class="min-w-0 flex-1">
                                     <p class="break-all text-sm font-medium">{{ row.email }}</p>
                                     <p class="mt-0.5 text-xs text-muted-foreground">
@@ -271,8 +273,8 @@ function formatQuota(mb) {
                                     class="inline-flex min-w-6 shrink-0 items-center justify-center rounded-full bg-rose-500 px-2 py-0.5 text-xs font-semibold tabular-nums text-white"
                                     title="Unread"
                                 >{{ row.unread }}</span>
-                                <Button variant="ghost" size="icon" class="shrink-0" title="Open webmail" @click="openWebmail(row)">
-                                    <ExternalLinkIcon class="size-4" />
+                                <Button variant="outline" size="icon" class="shrink-0" title="Open this mailbox in webmail" @click="openWebmail(row)">
+                                    <InboxIcon class="size-4" />
                                 </Button>
                             </div>
                         </div>
@@ -289,8 +291,13 @@ function formatQuota(mb) {
                             <TableBody>
                                 <TableRow v-for="row in live.mailboxes" :key="row.id">
                                     <TableCell>
-                                        <p class="font-medium">{{ row.email }}</p>
-                                        <p v-if="row.name" class="text-xs text-muted-foreground">{{ row.name }}</p>
+                                        <div class="flex items-center gap-3">
+                                            <MailboxAvatar :email="row.email" :name="row.name" size="sm" />
+                                            <div class="min-w-0">
+                                                <p class="font-medium">{{ row.email }}</p>
+                                                <p v-if="row.name" class="text-xs text-muted-foreground">{{ row.name }}</p>
+                                            </div>
+                                        </div>
                                     </TableCell>
                                     <template v-if="row.error">
                                         <TableCell colspan="3" class="text-right text-xs text-muted-foreground">{{ row.error }}</TableCell>
@@ -307,8 +314,9 @@ function formatQuota(mb) {
                                         <TableCell class="text-right tabular-nums">{{ row.total }}</TableCell>
                                     </template>
                                     <TableCell class="text-right">
-                                        <Button variant="ghost" size="icon-sm" title="Open webmail" @click="openWebmail(row)">
-                                            <ExternalLinkIcon class="size-4" />
+                                        <Button variant="outline" size="sm" class="gap-1.5" title="Open this mailbox in webmail" @click="openWebmail(row)">
+                                            <InboxIcon class="size-4" />
+                                            Open
                                         </Button>
                                     </TableCell>
                                 </TableRow>

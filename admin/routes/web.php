@@ -34,7 +34,6 @@ Route::middleware('auth')->group(function () {
     Route::prefix('webmail')->group(function () {
         Route::get('/', [WebmailController::class, 'index'])->name('webmail');
         Route::get('/compose', [WebmailController::class, 'compose'])->name('webmail.compose');
-        Route::post('/login', [WebmailController::class, 'login'])->name('webmail.login');
         Route::post('/logout', [WebmailController::class, 'logout'])->name('webmail.logout');
         Route::get('/folders', [WebmailController::class, 'folders']);
         Route::post('/folders', [WebmailController::class, 'storeFolder']);

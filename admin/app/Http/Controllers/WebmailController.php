@@ -8,7 +8,6 @@ use App\Services\WebmailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Throwable;
@@ -17,13 +16,21 @@ class WebmailController extends Controller
 {
     public function __construct(private readonly WebmailService $webmail) {}
 
-    public function index(Request $request): Response
+    /**
+     * The mail client itself. There is no page for choosing or signing in to a
+     * mailbox: it is opened with the "Open" button in the Mailboxes list (Dovecot
+     * master-user login), so without an open mailbox this goes back to that list.
+     */
+    public function index(Request $request): Response|RedirectResponse
     {
         $credentials = $this->credentials($request);
 
+        if (! $credentials) {
+            return redirect('/mailboxes')->with('error', 'Open a mailbox with the Open button in the list.');
+        }
+
         return Inertia::render('Webmail', [
-            'connected' => (bool) $credentials,
-            'email' => $credentials['email'] ?? null,
+            'email' => $credentials['email'],
         ]);
     }
 
@@ -32,7 +39,7 @@ class WebmailController extends Controller
         $credentials = $this->credentials($request);
 
         if (! $credentials) {
-            return redirect('/webmail');
+            return redirect('/mailboxes');
         }
 
         $to = (string) $request->query('to', '');
@@ -96,26 +103,6 @@ class WebmailController extends Controller
     private function extractEmailAddress(string $address): string
     {
         return preg_match('/<([^>]+)>/', $address, $m) ? $m[1] : $address;
-    }
-
-    public function login(Request $request): RedirectResponse
-    {
-        $data = $request->validate([
-            'email' => ['required', 'email'],
-            'password' => ['required', 'string'],
-        ]);
-
-        try {
-            $this->webmail->testLogin($data['email'], $data['password']);
-        } catch (Throwable) {
-            throw ValidationException::withMessages([
-                'password' => 'Could not connect: wrong credentials or the mailbox is unavailable.',
-            ]);
-        }
-
-        $request->session()->put('webmail_credentials', encrypt($data));
-
-        return back();
     }
 
     /**

@@ -1,6 +1,7 @@
 <script setup>
-import { Head } from '@inertiajs/vue3';
+import { Head, Link } from '@inertiajs/vue3';
 import MailboxController from '@/actions/App/Http/Controllers/MailboxController';
+import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import WebmailController from '@/actions/App/Http/Controllers/WebmailController';
 import { ref, watch } from 'vue';
 import { useForm, router } from '@inertiajs/vue3';
@@ -9,11 +10,12 @@ import AppLayout from '../../Layouts/AppLayout.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import Pagination from '@/components/Pagination.vue';
 import SortableHeader from '@/components/SortableHeader.vue';
 import NativeSelect from '@/components/NativeSelect.vue';
+import PasswordInput from '@/components/PasswordInput.vue';
+import MailboxAvatar from '@/components/MailboxAvatar.vue';
 import {
     Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -63,23 +65,54 @@ function sort(field) {
     reload();
 }
 
+// Switch a mailbox on or off from the list. A disabled mailbox can no longer sign in over IMAP/SMTP.
+function toggleActive(mailbox) {
+    router.put(MailboxController.update(mailbox.id), {
+        name: mailbox.name,
+        quota_mb: mailbox.quota_mb,
+        is_active: ! mailbox.is_active,
+    }, { preserveScroll: true });
+}
+
 function openWebmail(mailbox) {
     router.post(WebmailController.loginAsMailbox(mailbox.id));
 }
 
 const createOpen = ref(false);
+// The address is built from a local part and a domain picked from the existing
+// (active) domains, so an address on an unknown domain cannot even be typed.
 const form = useForm({
-    email: '',
+    local: '',
+    domain: props.domains[0] ?? '',
     password: '',
     name: '',
     quota_mb: 3072,
-});
+}).transform(({ local, domain, ...rest }) => ({
+    ...rest,
+    email: `${local.trim().toLowerCase()}@${domain}`,
+}));
+
+// Keep the address valid while typing: lowercase letters, digits and . _ + -
+function cleanLocal() {
+    form.local = form.local.toLowerCase().replace(/[^a-z0-9._+-]/g, '');
+}
+
+function openCreate() {
+    form.clearErrors();
+    // Preselect the domain currently used as a filter.
+    if (props.filters.domain && props.filters.domain !== 'all' && props.domains.includes(props.filters.domain)) {
+        form.domain = props.filters.domain;
+    } else if (! props.domains.includes(form.domain)) {
+        form.domain = props.domains[0] ?? '';
+    }
+    createOpen.value = true;
+}
 
 function submit() {
     form.submit(MailboxController.store(), {
         preserveScroll: true,
         onSuccess: () => {
-            form.reset('email', 'password', 'name');
+            form.reset('local', 'password', 'name');
             createOpen.value = false;
         },
     });
@@ -129,7 +162,7 @@ function confirmDelete() {
         <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-xl font-semibold">Mailboxes</h2>
             <Dialog v-model:open="createOpen">
-                <Button @click="createOpen = true">
+                <Button @click="openCreate">
                     <PlusIcon class="size-4" />
                     Add mailbox
                 </Button>
@@ -137,15 +170,39 @@ function confirmDelete() {
                     <DialogHeader>
                         <DialogTitle>Add mailbox</DialogTitle>
                     </DialogHeader>
-                    <form @submit.prevent="submit" class="space-y-4">
+                    <p v-if="! domains.length" class="rounded-md bg-muted px-3 py-3 text-sm text-muted-foreground">
+                        There are no active domains yet. A mailbox can only be created on an existing domain,
+                        <Link :href="DomainController.index.url()" class="text-foreground underline underline-offset-4" @click="createOpen = false">add a domain</Link>
+                        first.
+                    </p>
+                    <form v-else @submit.prevent="submit" class="space-y-4">
                         <div class="space-y-1.5">
-                            <Label for="email">Email</Label>
-                            <Input id="email" v-model="form.email" type="email" list="known-domains" placeholder="user@example.com" autofocus />
+                            <Label for="email-local">Email</Label>
+                            <div class="flex items-center gap-2">
+                                <Input
+                                    id="email-local"
+                                    v-model="form.local"
+                                    type="text"
+                                    inputmode="email"
+                                    autocapitalize="off"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                    placeholder="name"
+                                    class="min-w-0 flex-1"
+                                    autofocus
+                                    @input="cleanLocal"
+                                />
+                                <span class="text-muted-foreground">@</span>
+                                <NativeSelect v-model="form.domain" class="w-full max-w-48 sm:w-48">
+                                    <option v-for="domain in domains" :key="domain" :value="domain">{{ domain }}</option>
+                                </NativeSelect>
+                            </div>
                             <p v-if="form.errors.email" class="text-sm text-destructive">{{ form.errors.email }}</p>
                         </div>
                         <div class="space-y-1.5">
                             <Label for="password">Password</Label>
-                            <Input id="password" v-model="form.password" type="text" />
+                            <PasswordInput id="password" v-model="form.password" />
+                            <p class="text-xs text-muted-foreground">At least 8 characters. Hidden by default, use the eye to show it.</p>
                             <p v-if="form.errors.password" class="text-sm text-destructive">{{ form.errors.password }}</p>
                         </div>
                         <div class="space-y-1.5">
@@ -157,14 +214,11 @@ function confirmDelete() {
                             <Input id="quota" v-model.number="form.quota_mb" type="number" min="1" />
                         </div>
                         <DialogFooter>
-                            <Button type="submit" :disabled="form.processing">Create</Button>
+                            <Button type="submit" :disabled="form.processing || ! form.local">Create</Button>
                         </DialogFooter>
                     </form>
                 </DialogContent>
             </Dialog>
-            <datalist id="known-domains">
-                <option v-for="domain in domains" :key="domain" :value="`@${domain}`"></option>
-            </datalist>
         </div>
 
         <div class="mb-4 grid grid-cols-2 gap-3 sm:flex sm:items-center">
@@ -194,32 +248,38 @@ function confirmDelete() {
                 <TableBody>
                     <TableRow v-for="mailbox in mailboxes.data" :key="mailbox.id">
                         <TableCell class="whitespace-normal break-all font-medium">
-                            {{ mailbox.email }}
-                            <!-- Phones: the hidden columns move under the address -->
-                            <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-normal text-muted-foreground md:hidden">
-                                <span v-if="mailbox.name">{{ mailbox.name }}</span>
-                                <span>{{ mailbox.quota_mb }} MB</span>
-                                <Badge class="sm:hidden" :variant="mailbox.is_active ? 'default' : 'secondary'">
-                                    {{ mailbox.is_active ? 'Active' : 'Disabled' }}
-                                </Badge>
+                            <div class="flex items-center gap-3">
+                                <MailboxAvatar :email="mailbox.email" :name="mailbox.name" />
+                                <div class="min-w-0">
+                                    {{ mailbox.email }}
+                                    <!-- Phones: the hidden columns move under the address -->
+                                    <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-normal text-muted-foreground md:hidden">
+                                        <span v-if="mailbox.name">{{ mailbox.name }}</span>
+                                        <span>{{ mailbox.quota_mb }} MB</span>
+                                        <span class="flex items-center gap-1.5 sm:hidden">
+                                            <Switch :model-value="mailbox.is_active" @update:model-value="toggleActive(mailbox)" />
+                                            {{ mailbox.is_active ? 'Active' : 'Disabled' }}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
                         </TableCell>
                         <TableCell class="hidden text-muted-foreground md:table-cell">{{ mailbox.name || '—' }}</TableCell>
                         <TableCell class="hidden text-muted-foreground md:table-cell">{{ mailbox.quota_mb }}</TableCell>
                         <TableCell class="hidden sm:table-cell">
-                            <Badge :variant="mailbox.is_active ? 'default' : 'secondary'">
-                                {{ mailbox.is_active ? 'Active' : 'Disabled' }}
-                            </Badge>
+                            <Switch :model-value="mailbox.is_active" @update:model-value="toggleActive(mailbox)" />
                         </TableCell>
                         <TableCell class="space-x-0.5 px-2 text-right sm:space-x-1 sm:px-4">
                             <Button
                                 v-if="webmailImpersonationEnabled"
-                                variant="ghost"
-                                size="icon-sm"
-                                title="Open webmail"
+                                variant="outline"
+                                size="sm"
+                                class="mr-1 gap-1.5"
+                                title="Open this mailbox in webmail"
                                 @click="openWebmail(mailbox)"
                             >
                                 <InboxIcon class="size-4" />
+                                <span class="hidden sm:inline">Open</span>
                             </Button>
                             <Button variant="ghost" size="icon-sm" @click="startEdit(mailbox)">
                                 <PencilIcon class="size-4" />
@@ -256,7 +316,7 @@ function confirmDelete() {
                 <form @submit.prevent="submitEdit" class="space-y-4">
                     <div class="space-y-1.5">
                         <Label for="edit-password">New password</Label>
-                        <Input id="edit-password" v-model="editForm.password" type="text" placeholder="Leave empty to keep current" />
+                        <PasswordInput id="edit-password" v-model="editForm.password" placeholder="Leave empty to keep current" />
                         <p v-if="editForm.errors.password" class="text-sm text-destructive">{{ editForm.errors.password }}</p>
                     </div>
                     <div class="space-y-1.5">
