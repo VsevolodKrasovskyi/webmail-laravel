@@ -4,7 +4,7 @@ Self-hosted mail server with a web admin panel and webmail.
 
 - **Postfix** (SMTP), **Dovecot** (IMAP, LMTP, SASL) and **Rspamd** (antispam, DKIM signing) run in Docker.
 - **PostgreSQL** holds domains, mailboxes, aliases, password hashes and quotas. Postfix and Dovecot read it directly.
-- **Admin panel** (Laravel 13, Vue 3, Inertia) runs on the host next to nginx and php-fpm. It manages the data above and includes webmail, drafts, scheduled sending and analytics.
+- **Admin panel** (Laravel 13, Vue 3, Inertia) runs on the host next to nginx and php-fpm. It manages the data above and includes webmail, drafts, scheduled sending and a dashboard with message counts.
 
 ## Features
 
@@ -12,7 +12,7 @@ Self-hosted mail server with a web admin panel and webmail.
 - Automatic DKIM key generation per domain, optional DNS sync through Cloudflare.
 - Webmail: threads, search, folders, drag and drop, Cc/Bcc, rich text, attachments, inline images, drafts with autosave, an "All mail" view and scheduled sending.
 - Admin shortcut that opens any mailbox's webmail without its password (Dovecot master user).
-- Dashboard, analytics and CSV reports (domains, mailboxes, scheduled mail).
+- Dashboard with live message counts per mailbox and an unread notification, growth charts, setup health, scheduled sending stats and a domain report.
 - Google-only sign-in for admins listed in `ADMIN_EMAIL`, no passwords stored or seeded.
 - Responsive layout for phones.
 
@@ -75,7 +75,7 @@ flowchart LR
 | **Rspamd** | Antispam milter. Signs outgoing mail with the per-domain DKIM keys. Uses Redis for its state. |
 | **Dovecot** | IMAP on 143 and 993, LMTP delivery into Maildir, SASL login for Postfix and per-mailbox quota from Postgres. |
 | **PostgreSQL** | Single source of truth for all mail routing data and the panel's own tables. Published on loopback only. |
-| **Admin panel** | Laravel and Vue (Inertia) on the host. Manages everything above, plus webmail, drafts, scheduled sending and analytics. The only component that writes to Postgres. |
+| **Admin panel** | Laravel and Vue (Inertia) on the host. Manages everything above, plus webmail, drafts, scheduled sending and the dashboard. The only component that writes to Postgres. |
 | **certbot** | Runs on the host and issues the one certificate that Postfix and Dovecot mount read-only. |
 
 The admin panel runs outside Docker and reaches Postgres on `127.0.0.1:5432` and Dovecot and Postfix on their published ports. TLS certificates come from the host's own certbot, and both containers mount `/etc/letsencrypt` read-only.
@@ -153,69 +153,57 @@ Two files, because two things read them. The root `.env` is for `docker-compose.
 | `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | Creates the Postgres database and user, and is what Postfix and Dovecot use for their SQL lookups. Same in `admin/.env`. |
 | `DOVECOT_MASTER_PASSWORD` | Password of the Dovecot master user. Lets the panel open any mailbox in webmail and send scheduled mail without mailbox passwords. Same in `admin/.env`. |
 
-### `admin/.env` – application
+### `admin/.env`
+
+Only variables that differ from the framework defaults are in `admin/.env.example`.
 
 | Variable | What it does |
 |---|---|
-| `APP_NAME` | Application name (Laravel default, the browser title is set in the frontend). |
+| `APP_NAME` | Application name. |
 | `APP_ENV` | `local` or `production`. |
-| `APP_KEY` | Encrypts sessions and the webmail credentials stored in the session. Create with `php artisan key:generate` and never change it on a live system without logging everyone out. |
+| `APP_KEY` | Encrypts sessions and the webmail credentials kept in the session. Create it with `php artisan key:generate`. Changing it later logs everyone out. |
 | `APP_DEBUG` | Detailed error pages. Must be `false` in production. |
-| `APP_URL` | Public URL of the panel. |
-| `APP_TIMEZONE` | Time zone for dates in the UI, reports and CSV files. Default `UTC`. |
-| `APP_LOCALE`, `APP_FALLBACK_LOCALE` | Laravel language settings. The UI itself is English only. |
-| `APP_FAKER_LOCALE` | Only used by factories and tests. |
-| `APP_MAINTENANCE_DRIVER` | Where `artisan down` keeps its state (`file`). |
-| `BCRYPT_ROUNDS` | Cost of the admin password hash. |
-| `LOG_CHANNEL`, `LOG_STACK`, `LOG_LEVEL`, `LOG_DEPRECATIONS_CHANNEL` | Logging. Logs go to `storage/logs/laravel.log`. |
-
-### `admin/.env` – database and mail server
-
-| Variable | What it does |
-|---|---|
-| `DB_CONNECTION`, `DB_HOST`, `DB_PORT` | Always `pgsql`, `127.0.0.1`, `5432` (Postgres is published on loopback). |
+| `APP_URL` | Public URL of the panel. The Google redirect URI is built from it as `APP_URL/auth/google/callback`. |
+| `APP_TIMEZONE` | Time zone for dates in the UI. Default `UTC`. |
+| `DB_CONNECTION`, `DB_HOST`, `DB_PORT` | `pgsql`, `127.0.0.1`, `5432`. Postgres is published on loopback. |
 | `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | Same as the root `.env`. |
 | `APP_DOMAIN` | Same as the root `.env`. Used as the MX target when syncing DNS. |
-| `DKIM_KEYS_PATH` | Where generated DKIM private keys are written. Must be the host path mounted into rspamd (`docker/data/dkim`, relative to `admin/`). |
-| `MAIL_DEFAULT_QUOTA_MB` | Quota suggested for new mailboxes. |
-| `IMAP_HOST`, `SMTP_HOST` | Where webmail connects (IMAP 993, SMTP 465). `127.0.0.1` because the panel runs on the same host. |
 | `DOVECOT_MASTER_PASSWORD` | Same as the root `.env`. |
-| `DOVECOT_MASTER_USER` | Optional, defaults to `admin`. Must match `docker/dovecot/master-users.template`. |
-
-### `admin/.env` – access
-
-| Variable | What it does |
-|---|---|
-| `ADMIN_EMAIL` | Google addresses allowed to sign in, comma-separated (`a@example.com,b@example.com`). The admin user is created on the first sign-in. Changing the list takes effect at the next sign-in, and an address removed from it can no longer log in. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | Google OAuth client for sign-in. Required, there is no other way to log in. |
+| `ADMIN_EMAIL` | Google addresses allowed to sign in, comma-separated (`a@example.com,b@example.com`). The admin user is created on the first sign-in. An address removed from the list can no longer log in. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client. Required, there is no other way to log in. |
+| `SESSION_SECURE_COOKIE` | `true` when the panel is served over HTTPS. With `false` on HTTPS or `true` on plain HTTP the login loops. |
 | `CLOUDFLARE_API_TOKEN` | Optional. Enables "Sync DNS" on the Domains page. |
-| `SESSION_DRIVER`, `SESSION_LIFETIME`, `SESSION_ENCRYPT`, `SESSION_PATH`, `SESSION_DOMAIN` | Session storage (database), lifetime in minutes and cookie scope. |
-| `SESSION_SECURE_COOKIE` | `true` when the panel is served over HTTPS. With `false` on HTTPS or `true` on plain HTTP login loops. |
 
-### `admin/.env` – framework defaults
+### Optional overrides
 
-| Variable | What it does |
-|---|---|
-| `CACHE_STORE` | Cache backend (`database`). |
-| `QUEUE_CONNECTION`, `FILESYSTEM_DISK` | Laravel defaults. The panel does not use queues or file storage, scheduled mail goes through its own `scheduled_emails` table. |
-| `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` | Laravel's own outgoing mail. The panel does not send mail through it (webmail uses SMTP directly), so `log` is fine. |
-| `VITE_APP_NAME` | Exposed to the frontend build. Not used by the current code. |
-| `INERTIA_SSR_ENABLED` | Optional, default `false`. There is no SSR bundle. |
+These work without being set. Add them to `admin/.env` only to change the default.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `DKIM_KEYS_PATH` | `../docker/data/dkim` | Where DKIM private keys are written. Must be the host path mounted into rspamd. |
+| `MAIL_DEFAULT_QUOTA_MB` | `3072` | Quota suggested for new mailboxes. |
+| `IMAP_HOST`, `SMTP_HOST` | `127.0.0.1` | Where webmail connects (IMAP 993, SMTP 465). |
+| `DOVECOT_MASTER_USER` | `admin` | Must match `docker/dovecot/master-users.template`. |
+| `SESSION_LIFETIME` | `120` | Minutes until an idle session expires. |
+| `LOG_LEVEL` | `debug` | Use `error` in production. Logs go to `storage/logs/laravel.log`. |
+| `INERTIA_SSR_ENABLED` | `false` | There is no SSR bundle. |
+
+Everything else (sessions, cache and queue in the database, the default mailer, locale) uses Laravel's defaults. The panel does not send mail through Laravel, so `MAIL_*` is not needed.
 
 ## Sign in with Google
 
 Google is the only way into the panel, there are no passwords. Only accounts whose **verified** Google email is listed in `ADMIN_EMAIL` are let in, and the admin user is created automatically on the first sign-in.
 
 1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials) create an **OAuth client ID** of type **Web application**.
-2. Add this **Authorized redirect URI**, exactly as it will be used, scheme included:
-   `https://<your panel host>/auth/google/callback`
+2. Add this **Authorized redirect URI**. It is always your `APP_URL` plus `/auth/google/callback`, scheme included, for example:
+   `https://<your panel host>/auth/google/callback` (locally `http://127.0.0.1:8000/auth/google/callback`)
 3. Put the values in `admin/.env`:
 
    ```env
+   APP_URL=https://<your panel host>
    ADMIN_EMAIL=you@example.com
    GOOGLE_CLIENT_ID=...
    GOOGLE_CLIENT_SECRET=...
-   GOOGLE_REDIRECT_URI=https://<your panel host>/auth/google/callback
    ```
 4. Run `php artisan config:clear` and open the panel. Click **Sign in with Google**.
 
@@ -323,7 +311,7 @@ The response must contain one item in `result`.
 
 ## Time zone
 
-Dates in the UI, reports and CSV files use `APP_TIMEZONE` from `admin/.env` (default `UTC`). The time picked in "Send later" is converted from the browser's time zone, so it is independent of this setting.
+Dates in the UI use `APP_TIMEZONE` from `admin/.env` (default `UTC`). The time picked in "Send later" is converted from the browser's time zone, so it is independent of this setting.
 
 ## Security notes
 
@@ -339,6 +327,6 @@ Dates in the UI, reports and CSV files use `APP_TIMEZONE` from `admin/.env` (def
 - **Local testing**: rspamd trusts private addresses and skips most checks for them, so self-addressed test mail often lacks `X-Spam-*` and `Authentication-Results` headers.
 - **rspamd web UI** is not exposed. To use it, set a password with `docker compose exec rspamd rspamadm pw` and publish port 11334.
 - **Backups**: back up the `pgdata` and `vmail` volumes and `docker/data/dkim`. Losing the DKIM keys means new keys and new DNS records.
-- **Analytics** are built from the admin database (domains, mailboxes, aliases, scheduled mail). Message traffic and real disk usage are not tracked.
+- **Dashboard numbers**: domains, mailboxes, aliases, growth and scheduled mail come from the admin database. Message counts per mailbox are read from Dovecot over IMAP with the master user (one `STATUS` per folder, nothing is fetched or marked as read), cached for 60 seconds and refreshed every minute while the dashboard is open. Without `DOVECOT_MASTER_PASSWORD` they are not shown. "Inbox" and "Unread" count INBOX, "Total" counts every folder except Junk and Trash. Message traffic over time and real disk usage are not tracked.
 - Draft attachments are not stored with the draft.
 - The webmail is an admin convenience, not a self-service portal with its own accounts.

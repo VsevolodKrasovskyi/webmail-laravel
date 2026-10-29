@@ -581,11 +581,56 @@ class WebmailService
         $client->disconnect();
     }
 
-    private function imapClient(string $email, string $password, ?string $authUser = null): ImapClient
+    /**
+     * Message counts for the dashboard, read with one IMAP STATUS per folder
+     * (no messages are fetched or marked as read).
+     *
+     * `inbox` and `unread` come from INBOX, `total` is every folder except
+     * Junk and Trash, like the "All mail" view.
+     *
+     * @return array{inbox:int, unread:int, total:int}
+     */
+    public function mailboxStats(string $email, string $password, ?string $authUser = null): array
+    {
+        $client = $this->imapClient($email, $password, $authUser, 8);
+        $client->connect();
+
+        $inbox = 0;
+        $unread = 0;
+        $total = 0;
+
+        try {
+            foreach ($client->getFolders(false) as $folder) {
+                try {
+                    $status = $client->getConnection()->folderStatus($folder->path, ['MESSAGES', 'UNSEEN'])->validatedData();
+                } catch (\Throwable) {
+                    continue; // not selectable (e.g. a container folder)
+                }
+
+                $messages = (int) ($status['messages'] ?? 0);
+
+                if ($folder->path === 'INBOX') {
+                    $inbox = $messages;
+                    $unread = (int) ($status['unseen'] ?? 0);
+                }
+
+                if (! in_array($folder->path, self::EXCLUDED_FROM_ALL, true)) {
+                    $total += $messages;
+                }
+            }
+        } finally {
+            $client->disconnect();
+        }
+
+        return ['inbox' => $inbox, 'unread' => $unread, 'total' => $total];
+    }
+
+    private function imapClient(string $email, string $password, ?string $authUser = null, int $timeout = 30): ImapClient
     {
         $manager = new ClientManager();
 
         return $manager->make([
+            'timeout' => $timeout,
             'host' => config('mail_server.imap_host'),
             'port' => 993,
             'encryption' => 'ssl',

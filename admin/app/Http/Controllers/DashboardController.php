@@ -6,37 +6,45 @@ use App\Models\Alias;
 use App\Models\Domain;
 use App\Models\Mailbox;
 use App\Models\ScheduledEmail;
+use App\Services\AnalyticsService;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class DashboardController extends Controller
 {
-    public function __invoke(): Response
+    public function __invoke(AnalyticsService $analytics): Response
     {
+        $domains = $analytics->domainRows();
+
         return Inertia::render('Dashboard', [
             'stats' => [
                 'domains' => $this->stat(Domain::class),
                 'mailboxes' => $this->stat(Mailbox::class),
                 'aliases' => $this->stat(Alias::class),
             ],
-            'quota_allocated_mb' => (int) Mailbox::sum('quota_mb'),
-            'recent_mailboxes' => Mailbox::with('domain:id,name')
-                ->latest()
-                ->limit(5)
-                ->get(['id', 'domain_id', 'email', 'name', 'is_active', 'created_at'])
-                ->map(fn ($m) => [
-                    'id' => $m->id,
-                    'email' => $m->email,
-                    'name' => $m->name,
-                    'is_active' => $m->is_active,
-                    'created_at' => $m->created_at?->diffForHumans(),
-                ]),
-            'attention' => [
-                'domains_without_dkim' => Domain::whereNull('dkim_public_key')->orWhere('dkim_public_key', '')->count(),
-                'inactive_mailboxes' => Mailbox::where('is_active', false)->count(),
-                'scheduled_pending' => ScheduledEmail::where('status', ScheduledEmail::PENDING)->count(),
-                'scheduled_failed' => ScheduledEmail::where('status', ScheduledEmail::FAILED)->count(),
+            'quota' => [
+                'allocated_mb' => (int) Mailbox::sum('quota_mb'),
+                'average_mb' => (int) round((float) Mailbox::avg('quota_mb')),
             ],
+            'attention' => [
+                'scheduled_failed' => ScheduledEmail::where('status', ScheduledEmail::FAILED)->count(),
+                'scheduled_pending' => ScheduledEmail::where('status', ScheduledEmail::PENDING)->count(),
+                'inactive_mailboxes' => Mailbox::where('is_active', false)->count(),
+                'without_dkim' => $domains->where('has_dkim', false)->pluck('name')->values(),
+                'without_mailboxes' => $domains->where('mailboxes', 0)->pluck('name')->values(),
+                'inactive_domains' => $domains->where('is_active', false)->pluck('name')->values(),
+            ],
+            'growth' => $analytics->growth(),
+            'domains' => $domains->values(),
+            'scheduled' => [
+                'by_status' => ScheduledEmail::query()
+                    ->selectRaw('status, count(*) as total')
+                    ->groupBy('status')
+                    ->pluck('total', 'status'),
+                'daily' => $analytics->scheduledDaily(),
+            ],
+            // Live message counts need the Dovecot master password.
+            'canReadMail' => filled(config('mail_server.dovecot_master_password')),
         ]);
     }
 

@@ -15,7 +15,7 @@ class GoogleLoginTest extends TestCase
 
     private function googleReturns(string $email, bool $verified = true): void
     {
-        $user = (new SocialiteUser())->map(['id' => 'g-1', 'name' => 'Ada', 'email' => $email]);
+        $user = (new SocialiteUser())->map(['id' => 'g-1', 'name' => 'Ada', 'email' => $email, 'avatar' => 'https://lh3.googleusercontent.com/a/photo=s96']);
         $user->user = ['email_verified' => $verified];
 
         $provider = Mockery::mock();
@@ -31,7 +31,11 @@ class GoogleLoginTest extends TestCase
         $this->get('/auth/google/callback')->assertRedirect('/dashboard');
 
         $this->assertAuthenticated();
-        $this->assertDatabaseHas('users', ['email' => 'boss@example.com', 'google_id' => 'g-1']);
+        $this->assertDatabaseHas('users', ['email' => 'boss@example.com', 'google_id' => 'g-1', 'avatar' => 'https://lh3.googleusercontent.com/a/photo=s96']);
+
+        // The session keeps working on later requests with no password column at all.
+        $this->get('/dashboard')->assertOk();
+        $this->get('/domains')->assertOk();
     }
 
     public function test_an_unlisted_account_is_rejected(): void

@@ -1,5 +1,6 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
+import AliasController from '@/actions/App/Http/Controllers/AliasController';
 import { ref, watch } from 'vue';
 import { useForm, router } from '@inertiajs/vue3';
 import { PlusIcon, Trash2Icon } from '@lucide/vue';
@@ -36,7 +37,7 @@ const query = ref({
 });
 
 function reload() {
-    router.get('/aliases', query.value, { preserveState: true, preserveScroll: true, replace: true });
+    router.get(AliasController.index(), query.value, { preserveState: true, preserveScroll: true, replace: true });
 }
 
 let searchTimeout;
@@ -64,7 +65,7 @@ const form = useForm({
 });
 
 function submit() {
-    form.post('/aliases', {
+    form.submit(AliasController.store(), {
         preserveScroll: true,
         onSuccess: () => {
             form.reset();
@@ -75,7 +76,7 @@ function submit() {
 
 function toggleActive(alias) {
     router.put(
-        `/aliases/${alias.id}`,
+        AliasController.update(alias.id),
         { destination: alias.destination, is_active: !alias.is_active },
         { preserveScroll: true },
     );
@@ -84,7 +85,7 @@ function toggleActive(alias) {
 const deleteTarget = ref(null);
 
 function confirmDelete() {
-    router.post(`/aliases/${deleteTarget.value.id}`, { _method: 'delete' }, {
+    router.delete(AliasController.destroy(deleteTarget.value.id), {
         preserveScroll: true,
         onFinish: () => {
             deleteTarget.value = null;
@@ -126,11 +127,11 @@ function confirmDelete() {
             </Dialog>
         </div>
 
-        <div class="mb-4 flex items-center gap-3">
-            <Input v-model="query.search" placeholder="Search aliases..." class="w-full sm:max-w-xs" />
+        <div class="mb-4 grid grid-cols-2 gap-3 sm:flex sm:items-center">
+            <Input v-model="query.search" placeholder="Search aliases..." class="col-span-2 sm:w-64" />
             <select
                 v-model="query.status"
-                class="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                class="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm sm:w-auto"
             >
                 <option value="all">All statuses</option>
                 <option value="active">Active</option>
@@ -143,19 +144,22 @@ function confirmDelete() {
                 <TableHeader>
                     <TableRow>
                         <SortableHeader field="source" :sort="query.sort" :direction="query.direction" @sort="sort">Source</SortableHeader>
-                        <SortableHeader field="destination" :sort="query.sort" :direction="query.direction" @sort="sort">Destination</SortableHeader>
+                        <SortableHeader class="hidden md:table-cell" field="destination" :sort="query.sort" :direction="query.direction" @sort="sort">Destination</SortableHeader>
                         <TableHead>Status</TableHead>
                         <TableHead></TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
                     <TableRow v-for="alias in aliases.data" :key="alias.id">
-                        <TableCell class="font-medium">{{ alias.source }}</TableCell>
-                        <TableCell class="text-muted-foreground">{{ alias.destination }}</TableCell>
+                        <TableCell class="whitespace-normal break-all font-medium">
+                            {{ alias.source }}
+                            <p class="mt-1 text-xs font-normal text-muted-foreground md:hidden">→ {{ alias.destination }}</p>
+                        </TableCell>
+                        <TableCell class="hidden text-muted-foreground md:table-cell">{{ alias.destination }}</TableCell>
                         <TableCell>
                             <div class="flex items-center gap-2">
                                 <Switch :model-value="alias.is_active" @update:model-value="toggleActive(alias)" />
-                                <Badge :variant="alias.is_active ? 'default' : 'secondary'">
+                                <Badge class="hidden sm:inline-flex" :variant="alias.is_active ? 'default' : 'secondary'">
                                     {{ alias.is_active ? 'Active' : 'Disabled' }}
                                 </Badge>
                             </div>

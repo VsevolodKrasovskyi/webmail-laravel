@@ -1,5 +1,6 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
+import WebmailController from '@/actions/App/Http/Controllers/WebmailController';
 import { ref, watch, onBeforeUnmount } from 'vue';
 import { Link } from '@inertiajs/vue3';
 import { toast } from 'vue-sonner';
@@ -96,8 +97,7 @@ async function saveDraft({ silent = false } = {}) {
     if (silent && snapshot === lastSaved) return;
     savingDraft.value = true;
     try {
-        const data = await fetchJson('/webmail/drafts', {
-            method: 'POST',
+        const data = await fetchJson(WebmailController.saveDraft(), {
             body: {
                 to: to.value,
                 cc: ccList.value,
@@ -193,9 +193,9 @@ async function schedule() {
     try {
         const payload = await buildPayload();
         payload.send_at = new Date(sendAt.value).toISOString();
-        await fetchJson('/webmail/schedule', { method: 'POST', body: payload });
+        await fetchJson(WebmailController.schedule(), { body: payload });
         toast.success('Message scheduled');
-        window.location.href = '/webmail';
+        window.location.href = WebmailController.index.url();
     } catch (e) {
         toast.error(e.message);
     } finally {
@@ -207,9 +207,9 @@ async function send() {
     if (! validate()) return;
     sending.value = true;
     try {
-        await fetchJson('/webmail/send', { method: 'POST', body: await buildPayload() });
+        await fetchJson(WebmailController.send(), { body: await buildPayload() });
         toast.success('Message sent');
-        window.location.href = '/webmail';
+        window.location.href = WebmailController.index.url();
     } catch (e) {
         toast.error(e.message);
     } finally {
@@ -223,7 +223,7 @@ async function send() {
         <Head title="New message" />
         <div class="mx-auto w-full max-w-3xl">
             <div class="mb-4 flex items-center gap-3">
-                <Link href="/webmail" class="rounded-full p-2 text-muted-foreground transition hover:bg-accent" aria-label="Back to webmail">
+                <Link :href="WebmailController.index.url()" class="rounded-full p-2 text-muted-foreground transition hover:bg-accent" aria-label="Back to webmail">
                     <ArrowLeftIcon class="size-4" />
                 </Link>
                 <h2 class="text-xl font-semibold tracking-tight">{{ inReplyTo ? 'Reply' : 'New message' }}</h2>
@@ -339,7 +339,7 @@ async function send() {
                             <SaveIcon class="size-4" />
                             <span class="hidden sm:inline">Save draft</span>
                         </Button>
-                        <Link href="/webmail">
+                        <Link :href="WebmailController.index.url()">
                             <Button variant="ghost" size="sm" title="Close">
                                 <XIcon class="size-4" />
                                 <span class="hidden sm:inline">Close</span>

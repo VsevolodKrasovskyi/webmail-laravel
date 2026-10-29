@@ -15,6 +15,7 @@ return new class extends Migration
             $table->string('mailbox_email')->index();
             $table->string('to');
             $table->json('cc')->nullable();
+            $table->json('bcc')->nullable();
             $table->string('subject');
             $table->longText('body');
             $table->string('in_reply_to')->nullable();

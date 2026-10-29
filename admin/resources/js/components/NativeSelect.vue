@@ -14,7 +14,7 @@ const modelValue = useVModel(props, 'modelValue', emits, { passive: true });
 </script>
 
 <template>
-    <div class="relative inline-block">
+    <div class="relative block sm:inline-block">
         <select
             v-model="modelValue"
             :class="cn(

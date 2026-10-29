@@ -1,5 +1,6 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
+import WebmailController from '@/actions/App/Http/Controllers/WebmailController';
 import { ref, computed, watch, onMounted } from 'vue';
 import { Link, useForm, router } from '@inertiajs/vue3';
 import { toast } from 'vue-sonner';
@@ -49,7 +50,7 @@ function folderIcon(path) {
 }
 
 const AVATAR_COLORS = [
-    'bg-rose-500', 'bg-amber-500', 'bg-emerald-500', 'bg-sky-500', 'bg-violet-500', 'bg-pink-500', 'bg-teal-500',
+    'bg-rose-500', 'bg-amber-500', 'bg-emerald-500', 'bg-sky-500', 'bg-blue-500', 'bg-pink-500', 'bg-teal-500',
 ];
 
 function extractEmail(address) {
@@ -98,14 +99,14 @@ function avatarColor(address) {
 const loginForm = useForm({ email: '', password: '' });
 
 function login() {
-    loginForm.post('/webmail/login', {
+    loginForm.submit(WebmailController.login(), {
         preserveScroll: true,
         onSuccess: () => loginForm.reset('password'),
     });
 }
 
 function logout() {
-    loginForm.post('/webmail/logout');
+    loginForm.submit(WebmailController.logout());
 }
 
 const DEFAULT_FOLDERS = [{ name: 'INBOX', label: 'Inbox', standard: true }];
@@ -115,7 +116,7 @@ const currentFolder = ref('INBOX');
 
 async function loadFolders() {
     try {
-        const data = await fetchJson('/webmail/folders');
+        const data = await fetchJson(WebmailController.folders());
         folders.value = data.folders.length ? data.folders : DEFAULT_FOLDERS;
     } catch (e) {
         toast.error(e.message);
@@ -135,7 +136,7 @@ const savingFolder = ref(false);
 async function createFolder() {
     savingFolder.value = true;
     try {
-        await fetchJson('/webmail/folders', { method: 'POST', body: { name: newFolderName.value } });
+        await fetchJson(WebmailController.storeFolder(), { body: { name: newFolderName.value } });
         toast.success('Folder created');
         creatingFolder.value = false;
         newFolderName.value = '';
@@ -155,7 +156,7 @@ async function confirmDeleteFolder() {
     if (! target) return;
     deletingFolder.value = true;
     try {
-        await fetchJson('/webmail/folders/delete', { method: 'POST', body: { path: target.name } });
+        await fetchJson(WebmailController.destroyFolder(), { body: { path: target.name } });
         toast.success('Folder deleted');
         if (currentFolder.value === target.name) {
             selectFolder('INBOX');
@@ -175,7 +176,7 @@ const confirmingEmpty = ref(false);
 async function emptyCurrentFolder() {
     emptyingFolder.value = true;
     try {
-        await fetchJson('/webmail/folders/empty', { method: 'POST', body: { path: currentFolder.value } });
+        await fetchJson(WebmailController.emptyFolder(), { body: { path: currentFolder.value } });
         toast.success('Folder emptied');
         confirmingEmpty.value = false;
         thread.value = null;
@@ -203,8 +204,7 @@ async function dropOnFolder(targetPath) {
         return;
     }
     try {
-        await fetchJson(`/webmail/messages/${uid}/move`, {
-            method: 'POST',
+        await fetchJson(WebmailController.moveMessage(uid), {
             body: { from, to: targetPath },
         });
         toast.success('Message moved');
@@ -231,11 +231,11 @@ watch(search, () => {
 async function loadMessages() {
     loadingMessages.value = true;
     try {
-        const params = new URLSearchParams({ folder: currentFolder.value });
+        const query = { folder: currentFolder.value };
         if (search.value) {
-            params.set('search', search.value);
+            query.search = search.value;
         }
-        const data = await fetchJson(`/webmail/messages?${params}`);
+        const data = await fetchJson(WebmailController.messages({ query }));
         messages.value = data.messages;
     } catch (e) {
         toast.error(e.message);
@@ -269,13 +269,13 @@ async function openThread(item) {
     const folder = item.folder ?? currentFolder.value;
 
     if (folder === 'Drafts') {
-        router.visit(`/webmail/compose?draft_uid=${uid}`);
+        router.visit(WebmailController.compose({ query: { draft_uid: uid } }));
         return;
     }
 
     loadingThread.value = true;
     try {
-        const data = await fetchJson(`/webmail/messages/${uid}?folder=${encodeURIComponent(folder)}`);
+        const data = await fetchJson(WebmailController.show(uid, { query: { folder } }));
         thread.value = data.messages;
         for (const m of messages.value) {
             if (m.uid === uid && m.folder === folder) {
@@ -291,9 +291,7 @@ async function openThread(item) {
 
 async function markUnread(uid, folder) {
     try {
-        await fetchJson(`/webmail/messages/${uid}/unread?folder=${encodeURIComponent(folder ?? currentFolder.value)}`, {
-            method: 'POST',
-        });
+        await fetchJson(WebmailController.markUnread(uid, { query: { folder: folder ?? currentFolder.value } }));
         for (const item of messages.value) {
             if (item.uid === uid && item.folder === (folder ?? currentFolder.value)) {
                 item.seen = false;
@@ -321,9 +319,7 @@ async function confirmDeleteMessage() {
     deleting.value = true;
     try {
         const folder = target.folder ?? currentFolder.value;
-        await fetchJson(`/webmail/messages/${target.uid}/delete?folder=${encodeURIComponent(folder)}`, {
-            method: 'POST',
-        });
+        await fetchJson(WebmailController.destroyMessage(target.uid, { query: { folder } }));
         toast.success(folder === SCHEDULED ? 'Scheduled message cancelled'
             : folder === 'Trash' || folder === 'Junk' ? 'Message deleted' : 'Moved to Trash');
         if (thread.value?.some((m) => m.uid === target.uid && m.folder === folder)) {
@@ -341,9 +337,11 @@ async function confirmDeleteMessage() {
 function replyHref() {
     const last = thread.value?.at(-1);
     if (! last) {
-        return '/webmail/compose';
+        return WebmailController.compose.url();
     }
-    return `/webmail/compose?quote_uid=${last.uid}&quote_folder=${encodeURIComponent(last.folder ?? currentFolder.value)}`;
+    return WebmailController.compose.url({
+        query: { quote_uid: last.uid, quote_folder: last.folder ?? currentFolder.value },
+    });
 }
 
 onMounted(() => {
@@ -391,7 +389,7 @@ onMounted(() => {
                         <RefreshCwIcon class="size-4" />
                         <span class="hidden sm:inline">Refresh</span>
                     </Button>
-                    <Link href="/webmail/compose">
+                    <Link :href="WebmailController.compose.url()">
                         <Button size="sm" class="gap-2 rounded-full px-4">
                             <PenSquareIcon class="size-4" />
                             Compose
@@ -404,7 +402,7 @@ onMounted(() => {
                 </div>
             </div>
 
-            <div class="flex h-[calc(100dvh-11rem)] min-h-[26rem] flex-col overflow-hidden rounded-2xl border bg-card lg:h-[75vh] lg:min-h-[32rem] lg:flex-row">
+            <div class="flex h-[calc(100dvh-15rem)] min-h-[24rem] flex-col overflow-hidden rounded-2xl border bg-card lg:h-[75vh] lg:min-h-[32rem] lg:flex-row">
                 <nav
                     class="flex shrink-0 flex-row gap-1 overflow-x-auto border-b p-2 transition-[width] lg:flex-col lg:gap-0 lg:space-y-0.5 lg:overflow-y-auto lg:overflow-x-hidden lg:border-b-0 lg:border-r lg:p-3"
                     :class="sidebarCollapsed ? 'lg:w-16 lg:p-2' : 'lg:w-56'"
@@ -582,7 +580,7 @@ onMounted(() => {
                                     <a
                                         v-for="a in m.attachments"
                                         :key="a.id"
-                                        :href="`/webmail/messages/${m.uid}/attachments/${a.id}?folder=${encodeURIComponent(m.folder)}`"
+                                        :href="WebmailController.downloadAttachment.url({ uid: m.uid, attachmentId: encodeURIComponent(a.id) }, { query: { folder: m.folder } })"
                                         target="_blank"
                                         class="flex items-center gap-1.5 rounded-full border bg-background px-3 py-1.5 text-xs transition hover:bg-accent"
                                     >

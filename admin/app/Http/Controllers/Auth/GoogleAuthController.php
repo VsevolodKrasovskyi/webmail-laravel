@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Str;
 use Laravel\Socialite\Facades\Socialite;
 use Throwable;
 
@@ -42,13 +41,11 @@ class GoogleAuthController extends Controller
 
         $user = User::firstOrCreate(
             ['email' => $email],
-            // The password is never used, it only satisfies the column.
-            ['name' => $googleUser->getName() ?: 'Admin', 'password' => Str::random(64)],
+            ['name' => $googleUser->getName() ?: 'Admin'],
         );
 
-        if (blank($user->google_id)) {
-            $user->update(['google_id' => $googleUser->getId()]);
-        }
+        // Keep the Google identity and profile picture current.
+        $user->fill(['google_id' => $user->google_id ?: $googleUser->getId(), 'avatar' => $googleUser->getAvatar()])->save();
 
         Auth::login($user);
         request()->session()->regenerate();

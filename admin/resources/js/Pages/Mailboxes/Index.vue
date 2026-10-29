@@ -1,5 +1,7 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
+import MailboxController from '@/actions/App/Http/Controllers/MailboxController';
+import WebmailController from '@/actions/App/Http/Controllers/WebmailController';
 import { ref, watch } from 'vue';
 import { useForm, router } from '@inertiajs/vue3';
 import { PlusIcon, Trash2Icon, PencilIcon, InboxIcon } from '@lucide/vue';
@@ -39,7 +41,7 @@ const query = ref({
 });
 
 function reload() {
-    router.get('/mailboxes', query.value, { preserveState: true, preserveScroll: true, replace: true });
+    router.get(MailboxController.index(), query.value, { preserveState: true, preserveScroll: true, replace: true });
 }
 
 let searchTimeout;
@@ -62,7 +64,7 @@ function sort(field) {
 }
 
 function openWebmail(mailbox) {
-    router.post(`/mailboxes/${mailbox.id}/webmail`);
+    router.post(WebmailController.loginAsMailbox(mailbox.id));
 }
 
 const createOpen = ref(false);
@@ -74,7 +76,7 @@ const form = useForm({
 });
 
 function submit() {
-    form.post('/mailboxes', {
+    form.submit(MailboxController.store(), {
         preserveScroll: true,
         onSuccess: () => {
             form.reset('email', 'password', 'name');
@@ -101,7 +103,7 @@ function startEdit(mailbox) {
 }
 
 function submitEdit() {
-    editForm.put(`/mailboxes/${editing.value.id}`, {
+    editForm.submit(MailboxController.update(editing.value.id), {
         preserveScroll: true,
         onSuccess: () => {
             editing.value = null;
@@ -112,7 +114,7 @@ function submitEdit() {
 const deleteTarget = ref(null);
 
 function confirmDelete() {
-    router.post(`/mailboxes/${deleteTarget.value.id}`, { _method: 'delete' }, {
+    router.delete(MailboxController.destroy(deleteTarget.value.id), {
         preserveScroll: true,
         onFinish: () => {
             deleteTarget.value = null;
@@ -165,14 +167,14 @@ function confirmDelete() {
             </datalist>
         </div>
 
-        <div class="mb-4 flex items-center gap-3">
-            <Input v-model="query.search" placeholder="Search mailboxes..." class="w-full sm:max-w-xs" />
-            <NativeSelect v-model="query.status" class="w-40">
+        <div class="mb-4 grid grid-cols-2 gap-3 sm:flex sm:items-center">
+            <Input v-model="query.search" placeholder="Search mailboxes..." class="col-span-2 sm:w-64" />
+            <NativeSelect v-model="query.status" class="w-full sm:w-40">
                 <option value="all">All statuses</option>
                 <option value="active">Active</option>
                 <option value="disabled">Disabled</option>
             </NativeSelect>
-            <NativeSelect v-model="query.domain" class="w-48">
+            <NativeSelect v-model="query.domain" class="w-full sm:w-48">
                 <option value="all">All domains</option>
                 <option v-for="domain in domains" :key="domain" :value="domain">{{ domain }}</option>
             </NativeSelect>
@@ -183,23 +185,33 @@ function confirmDelete() {
                 <TableHeader>
                     <TableRow>
                         <SortableHeader field="email" :sort="query.sort" :direction="query.direction" @sort="sort">Email</SortableHeader>
-                        <TableHead>Owner</TableHead>
-                        <SortableHeader field="quota_mb" :sort="query.sort" :direction="query.direction" @sort="sort">Quota, MB</SortableHeader>
-                        <TableHead>Status</TableHead>
+                        <TableHead class="hidden md:table-cell">Owner</TableHead>
+                        <SortableHeader class="hidden md:table-cell" field="quota_mb" :sort="query.sort" :direction="query.direction" @sort="sort">Quota, MB</SortableHeader>
+                        <TableHead class="hidden sm:table-cell">Status</TableHead>
                         <TableHead></TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
                     <TableRow v-for="mailbox in mailboxes.data" :key="mailbox.id">
-                        <TableCell class="font-medium">{{ mailbox.email }}</TableCell>
-                        <TableCell class="text-muted-foreground">{{ mailbox.name || '—' }}</TableCell>
-                        <TableCell class="text-muted-foreground">{{ mailbox.quota_mb }}</TableCell>
-                        <TableCell>
+                        <TableCell class="whitespace-normal break-all font-medium">
+                            {{ mailbox.email }}
+                            <!-- Phones: the hidden columns move under the address -->
+                            <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-normal text-muted-foreground md:hidden">
+                                <span v-if="mailbox.name">{{ mailbox.name }}</span>
+                                <span>{{ mailbox.quota_mb }} MB</span>
+                                <Badge class="sm:hidden" :variant="mailbox.is_active ? 'default' : 'secondary'">
+                                    {{ mailbox.is_active ? 'Active' : 'Disabled' }}
+                                </Badge>
+                            </div>
+                        </TableCell>
+                        <TableCell class="hidden text-muted-foreground md:table-cell">{{ mailbox.name || '—' }}</TableCell>
+                        <TableCell class="hidden text-muted-foreground md:table-cell">{{ mailbox.quota_mb }}</TableCell>
+                        <TableCell class="hidden sm:table-cell">
                             <Badge :variant="mailbox.is_active ? 'default' : 'secondary'">
                                 {{ mailbox.is_active ? 'Active' : 'Disabled' }}
                             </Badge>
                         </TableCell>
-                        <TableCell class="space-x-1 text-right">
+                        <TableCell class="space-x-0.5 px-2 text-right sm:space-x-1 sm:px-4">
                             <Button
                                 v-if="webmailImpersonationEnabled"
                                 variant="ghost"

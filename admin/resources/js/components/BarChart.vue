@@ -8,7 +8,7 @@ const props = defineProps({
     height: { type: Number, default: 120 },
     // Show every Nth label to avoid collisions on dense axes.
     labelEvery: { type: Number, default: 1 },
-    barClass: { type: String, default: 'bg-indigo-500' },
+    barClass: { type: String, default: 'bg-blue-500' },
 });
 
 const max = computed(() => Math.max(1, ...props.items.map((i) => i.value)));

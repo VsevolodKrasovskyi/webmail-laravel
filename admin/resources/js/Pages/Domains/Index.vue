@@ -1,5 +1,6 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
+import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import { ref, watch } from 'vue';
 import { useForm, router } from '@inertiajs/vue3';
 import { PlusIcon, Trash2Icon, CloudIcon } from '@lucide/vue';
@@ -37,7 +38,7 @@ const query = ref({
 });
 
 function reload() {
-    router.get('/domains', query.value, { preserveState: true, preserveScroll: true, replace: true });
+    router.get(DomainController.index(), query.value, { preserveState: true, preserveScroll: true, replace: true });
 }
 
 let searchTimeout;
@@ -62,7 +63,7 @@ const createOpen = ref(false);
 const form = useForm({ name: '' });
 
 function submit() {
-    form.post('/domains', {
+    form.submit(DomainController.store(), {
         preserveScroll: true,
         onSuccess: () => {
             form.reset();
@@ -72,13 +73,13 @@ function submit() {
 }
 
 function toggleActive(domain) {
-    router.put(`/domains/${domain.id}`, { is_active: !domain.is_active }, { preserveScroll: true });
+    router.put(DomainController.update(domain.id), { is_active: !domain.is_active }, { preserveScroll: true });
 }
 
 const deleteTarget = ref(null);
 
 function confirmDelete() {
-    router.post(`/domains/${deleteTarget.value.id}`, { _method: 'delete' }, {
+    router.delete(DomainController.destroy(deleteTarget.value.id), {
         preserveScroll: true,
         onFinish: () => {
             deleteTarget.value = null;
@@ -91,7 +92,7 @@ const syncing = ref(false);
 
 function syncDns(domain) {
     syncing.value = true;
-    router.post(`/domains/${domain.id}/dns`, {}, {
+    router.post(DomainController.syncDns(domain.id), {}, {
         preserveScroll: true,
         onFinish: () => {
             syncing.value = false;
@@ -129,9 +130,9 @@ function syncDns(domain) {
             </Dialog>
         </div>
 
-        <div class="mb-4 flex items-center gap-3">
-            <Input v-model="query.search" placeholder="Search domains..." class="w-full sm:max-w-xs" />
-            <NativeSelect v-model="query.status" class="w-40">
+        <div class="mb-4 grid grid-cols-2 gap-3 sm:flex sm:items-center">
+            <Input v-model="query.search" placeholder="Search domains..." class="col-span-2 sm:w-64" />
+            <NativeSelect v-model="query.status" class="w-full sm:w-40">
                 <option value="all">All statuses</option>
                 <option value="active">Active</option>
                 <option value="disabled">Disabled</option>
@@ -143,25 +144,28 @@ function syncDns(domain) {
                 <TableHeader>
                     <TableRow>
                         <SortableHeader field="name" :sort="query.sort" :direction="query.direction" @sort="sort">Domain</SortableHeader>
-                        <SortableHeader field="mailboxes_count" :sort="query.sort" :direction="query.direction" @sort="sort">Mailboxes</SortableHeader>
-                        <SortableHeader field="aliases_count" :sort="query.sort" :direction="query.direction" @sort="sort">Aliases</SortableHeader>
+                        <SortableHeader class="hidden sm:table-cell" field="mailboxes_count" :sort="query.sort" :direction="query.direction" @sort="sort">Mailboxes</SortableHeader>
+                        <SortableHeader class="hidden sm:table-cell" field="aliases_count" :sort="query.sort" :direction="query.direction" @sort="sort">Aliases</SortableHeader>
                         <TableHead>Status</TableHead>
                         <TableHead></TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
                     <TableRow v-for="domain in domains.data" :key="domain.id">
-                        <TableCell class="font-medium">
-                            <button class="underline decoration-dotted underline-offset-4" @click="dnsDomain = domain">
+                        <TableCell class="whitespace-normal break-all font-medium">
+                            <button class="text-left underline decoration-dotted underline-offset-4" @click="dnsDomain = domain">
                                 {{ domain.name }}
                             </button>
+                            <p class="mt-1 text-xs font-normal text-muted-foreground sm:hidden">
+                                {{ domain.mailboxes_count }} mailboxes · {{ domain.aliases_count }} aliases
+                            </p>
                         </TableCell>
-                        <TableCell class="text-muted-foreground">{{ domain.mailboxes_count }}</TableCell>
-                        <TableCell class="text-muted-foreground">{{ domain.aliases_count }}</TableCell>
+                        <TableCell class="hidden text-muted-foreground sm:table-cell">{{ domain.mailboxes_count }}</TableCell>
+                        <TableCell class="hidden text-muted-foreground sm:table-cell">{{ domain.aliases_count }}</TableCell>
                         <TableCell>
                             <div class="flex items-center gap-2">
                                 <Switch :model-value="domain.is_active" @update:model-value="toggleActive(domain)" />
-                                <Badge :variant="domain.is_active ? 'default' : 'secondary'">
+                                <Badge class="hidden sm:inline-flex" :variant="domain.is_active ? 'default' : 'secondary'">
                                     {{ domain.is_active ? 'Active' : 'Disabled' }}
                                 </Badge>
                             </div>
