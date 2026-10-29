@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import Pagination from '@/components/Pagination.vue';
 import SortableHeader from '@/components/SortableHeader.vue';
-import NativeSelect from '@/components/NativeSelect.vue';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
     Table, TableBody, TableCell, TableEmpty, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -128,14 +128,16 @@ function confirmDelete() {
 
         <div class="mb-4 grid grid-cols-2 gap-3 sm:flex sm:items-center">
             <Input v-model="query.search" placeholder="Search aliases..." class="col-span-2 sm:w-64" />
-            <select
-                v-model="query.status"
-                class="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm sm:w-auto"
-            >
-                <option value="all">All statuses</option>
-                <option value="active">Active</option>
-                <option value="disabled">Disabled</option>
-            </select>
+            <Select v-model="query.status">
+                <SelectTrigger class="w-full sm:w-40" aria-label="Status">
+                    <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="disabled">Disabled</SelectItem>
+                </SelectContent>
+            </Select>
         </div>
 
         <div class="rounded-xl border bg-card">

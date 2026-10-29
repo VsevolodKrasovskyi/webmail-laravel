@@ -1,7 +1,7 @@
 <script setup>
 import { ChevronLeftIcon, ChevronRightIcon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
-import NativeSelect from '@/components/NativeSelect.vue';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // Footer for a table paged on the server (a Laravel paginator, or the same shape):
 // range, rows per page (always shown) and previous/next.
@@ -22,12 +22,17 @@ const emit = defineEmits(['page', 'size']);
             <template v-else>0 of 0</template>
         </p>
         <div class="flex items-center gap-3">
-            <label v-if="selectable" class="flex items-center gap-2 text-muted-foreground">
+            <div v-if="selectable" class="flex items-center gap-2 text-muted-foreground">
                 <span class="hidden sm:inline">Rows per page</span>
-                <NativeSelect :model-value="meta.per_page" class="h-8 w-[4.5rem] text-xs" aria-label="Rows per page" @update:model-value="(v) => emit('size', Number(v))">
-                    <option v-for="n in sizes" :key="n" :value="n">{{ n }}</option>
-                </NativeSelect>
-            </label>
+                <Select :model-value="meta.per_page" @update:model-value="(v) => emit('size', Number(v))">
+                    <SelectTrigger size="sm" class="w-[4.5rem] text-xs text-foreground" aria-label="Rows per page">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem v-for="n in sizes" :key="n" :value="n">{{ n }}</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
             <div class="flex items-center gap-1">
                 <Button variant="outline" size="icon-sm" :disabled="meta.current_page <= 1" aria-label="Previous page" @click="emit('page', meta.current_page - 1)">
                     <ChevronLeftIcon class="size-4" />

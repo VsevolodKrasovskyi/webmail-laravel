@@ -1,6 +1,6 @@
 <script setup>
 import { Link } from '@inertiajs/vue3';
-import NativeSelect from '@/components/NativeSelect.vue';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const props = defineProps({
     // Laravel paginator meta: { current_page, last_page, from, to, total, links }
@@ -19,12 +19,17 @@ const emit = defineEmits(['size']);
             <template v-if="meta.total">Showing {{ meta.from }}–{{ meta.to }} of {{ meta.total }}</template>
             <template v-else>0 results</template>
         </p>
-        <label v-if="sizes" class="flex items-center gap-2">
+        <div v-if="sizes" class="flex items-center gap-2">
             <span class="hidden sm:inline">Rows per page</span>
-            <NativeSelect :model-value="perPage ?? meta.per_page" class="h-8 w-[4.75rem] text-xs" aria-label="Rows per page" @update:model-value="(v) => emit('size', Number(v))">
-                <option v-for="n in sizes" :key="n" :value="n">{{ n }}</option>
-            </NativeSelect>
-        </label>
+            <Select :model-value="perPage ?? meta.per_page" @update:model-value="(v) => emit('size', Number(v))">
+                <SelectTrigger size="sm" class="w-[4.75rem] text-xs" aria-label="Rows per page">
+                    <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem v-for="n in sizes" :key="n" :value="n">{{ n }}</SelectItem>
+                </SelectContent>
+            </Select>
+        </div>
         <div v-if="meta.last_page > 1" class="flex items-center gap-1">
             <template v-for="(link, index) in meta.links" :key="index">
                 <span
