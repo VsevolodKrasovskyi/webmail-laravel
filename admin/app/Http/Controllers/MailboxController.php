@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Domain;
+use App\Support\PageSize;
 use App\Models\Mailbox;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -39,11 +40,14 @@ class MailboxController extends Controller
 
         $query->orderBy($sort, $direction);
 
+        // Rows per page: 10, 20, 50 or 100 (default 10).
+        $perPage = PageSize::list($request->query('per_page'));
+
         return Inertia::render('Mailboxes/Index', [
-            'mailboxes' => $query->paginate(15)->withQueryString(),
+            'mailboxes' => $query->paginate($perPage)->withQueryString(),
             'domains' => Domain::where('is_active', true)->orderBy('name')->pluck('name'),
             'webmailImpersonationEnabled' => filled(config('mail_server.dovecot_master_password')),
-            'filters' => array_merge(['search' => '', 'status' => 'all', 'domain' => 'all', 'sort' => $sort, 'direction' => $direction], $filters),
+            'filters' => array_merge(['search' => '', 'status' => 'all', 'domain' => 'all', 'sort' => $sort, 'direction' => $direction], $filters, ['per_page' => $perPage]),
         ]);
     }
 

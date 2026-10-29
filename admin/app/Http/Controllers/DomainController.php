@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Domain;
+use App\Support\PageSize;
 use App\Services\CloudflareService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -35,9 +36,12 @@ class DomainController extends Controller
 
         $query->orderBy($sort, $direction);
 
+        // Rows per page: 10, 20, 50 or 100 (default 10).
+        $perPage = PageSize::list($request->query('per_page'));
+
         return Inertia::render('Domains/Index', [
-            'domains' => $query->paginate(15)->withQueryString(),
-            'filters' => array_merge(['search' => '', 'status' => 'all', 'sort' => $sort, 'direction' => $direction], $filters),
+            'domains' => $query->paginate($perPage)->withQueryString(),
+            'filters' => array_merge(['search' => '', 'status' => 'all', 'sort' => $sort, 'direction' => $direction], $filters, ['per_page' => $perPage]),
             'cloudflareEnabled' => $this->cloudflare->isConfigured(),
         ]);
     }

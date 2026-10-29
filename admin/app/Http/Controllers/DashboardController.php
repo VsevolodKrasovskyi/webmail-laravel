@@ -7,13 +7,12 @@ use App\Models\Domain;
 use App\Models\Mailbox;
 use App\Models\ScheduledEmail;
 use App\Services\AnalyticsService;
-use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class DashboardController extends Controller
 {
-    public function __invoke(Request $request, AnalyticsService $analytics): Response
+    public function __invoke(AnalyticsService $analytics): Response
     {
         $domains = $analytics->domainRows();
 
@@ -36,8 +35,8 @@ class DashboardController extends Controller
                 'inactive_domains' => $domains->where('is_active', false)->pluck('name')->values(),
             ],
             'growth' => $analytics->growth(),
-            // The domain report is paged in the database (`domains_page`, `domains_per_page`, default 5).
-            'domains' => $analytics->domainsPage(AnalyticsService::pageSize($request->query('domains_per_page'))),
+            // The domain report is paged in the database (`domains_page`), always 5 rows.
+            'domains' => $analytics->domainsPage(),
             'top_domains' => $domains->sortByDesc('mailboxes')->take(10)->map(fn ($d) => ['name' => $d['name'], 'mailboxes' => $d['mailboxes']])->values(),
             'scheduled' => [
                 'by_status' => ScheduledEmail::query()

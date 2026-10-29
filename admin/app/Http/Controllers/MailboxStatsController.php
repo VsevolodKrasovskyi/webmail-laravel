@@ -3,14 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\Mailbox;
-use App\Services\AnalyticsService;
+use App\Support\PageSize;
 use App\Services\MailboxStatsReader;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * One page of the dashboard's "Messages by mailbox" table, paged in the database
- * (`page`, `per_page`). Only the mailboxes on that page are read over IMAP.
+ * One page (always 5) of the dashboard's "Messages by mailbox" table, paged in the database
+ * (`page`). Only the mailboxes on that page are read over IMAP.
  */
 class MailboxStatsController extends Controller
 {
@@ -22,7 +22,7 @@ class MailboxStatsController extends Controller
 
         $page = Mailbox::where('is_active', true)
             ->orderBy('email')
-            ->paginate(AnalyticsService::pageSize($request->query('per_page')));
+            ->paginate(PageSize::DASHBOARD);
 
         return response()->json([
             'mailboxes' => $reader->rows($page->getCollection(), $request->boolean('refresh')),

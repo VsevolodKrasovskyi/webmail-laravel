@@ -1,18 +1,31 @@
 <script setup>
 import { Link } from '@inertiajs/vue3';
+import NativeSelect from '@/components/NativeSelect.vue';
 
 const props = defineProps({
     // Laravel paginator meta: { current_page, last_page, from, to, total, links }
     meta: Object,
+    // Optional: sizes offered in a "Rows per page" dropdown, and the current one.
+    sizes: { type: Array, default: null },
+    perPage: { type: Number, default: null },
 });
+
+const emit = defineEmits(['size']);
 </script>
 
 <template>
-    <div v-if="meta.last_page > 1" class="flex items-center justify-between border-t px-4 py-3 text-sm text-muted-foreground">
+    <div v-if="sizes || meta.last_page > 1" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t px-4 py-3 text-sm text-muted-foreground">
         <p>
-            Showing {{ meta.from }}–{{ meta.to }} of {{ meta.total }}
+            <template v-if="meta.total">Showing {{ meta.from }}–{{ meta.to }} of {{ meta.total }}</template>
+            <template v-else>0 results</template>
         </p>
-        <div class="flex items-center gap-1">
+        <label v-if="sizes" class="flex items-center gap-2">
+            <span class="hidden sm:inline">Rows per page</span>
+            <NativeSelect :model-value="perPage ?? meta.per_page" class="h-8 w-[4.75rem] text-xs" aria-label="Rows per page" @update:model-value="(v) => emit('size', Number(v))">
+                <option v-for="n in sizes" :key="n" :value="n">{{ n }}</option>
+            </NativeSelect>
+        </label>
+        <div v-if="meta.last_page > 1" class="flex items-center gap-1">
             <template v-for="(link, index) in meta.links" :key="index">
                 <span
                     v-if="! link.url"

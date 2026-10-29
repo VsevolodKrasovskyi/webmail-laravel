@@ -8,6 +8,8 @@ import NativeSelect from '@/components/NativeSelect.vue';
 const props = defineProps({
     meta: { type: Object, required: true },
     sizes: { type: Array, default: () => [5, 10, 20, 50] },
+    // false = a fixed page size, no dropdown
+    selectable: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['page', 'size']);
@@ -20,7 +22,7 @@ const emit = defineEmits(['page', 'size']);
             <template v-else>0 of 0</template>
         </p>
         <div class="flex items-center gap-3">
-            <label class="flex items-center gap-2 text-muted-foreground">
+            <label v-if="selectable" class="flex items-center gap-2 text-muted-foreground">
                 <span class="hidden sm:inline">Rows per page</span>
                 <NativeSelect :model-value="meta.per_page" class="h-8 w-[4.5rem] text-xs" aria-label="Rows per page" @update:model-value="(v) => emit('size', Number(v))">
                     <option v-for="n in sizes" :key="n" :value="n">{{ n }}</option>

@@ -35,6 +35,7 @@ const query = ref({
     status: props.filters.status,
     sort: props.filters.sort,
     direction: props.filters.direction,
+    per_page: props.filters.per_page,
 });
 
 function reload() {
@@ -48,6 +49,8 @@ watch(() => query.value.search, () => {
 });
 
 watch(() => query.value.status, reload);
+// Changing the page size returns to the first page (no `page` is sent).
+watch(() => query.value.per_page, reload);
 
 function sort(field) {
     if (query.value.sort === field) {
@@ -206,7 +209,7 @@ function syncDns(domain) {
                     <TableEmpty v-if="domains.data.length === 0" :colspan="5">No domains found.</TableEmpty>
                 </TableBody>
             </Table>
-            <Pagination :meta="domains" />
+            <Pagination :meta="domains" :sizes="[10, 20, 50, 100]" :per-page="query.per_page" @size="(n) => (query.per_page = n)" />
         </div>
 
         <AlertDialog :open="deleteTarget !== null" @update:open="(v) => !v && (deleteTarget = null)">

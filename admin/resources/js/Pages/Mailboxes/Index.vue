@@ -40,6 +40,7 @@ const query = ref({
     domain: props.filters.domain,
     sort: props.filters.sort,
     direction: props.filters.direction,
+    per_page: props.filters.per_page,
 });
 
 function reload() {
@@ -53,6 +54,8 @@ watch(() => query.value.search, () => {
 });
 
 watch(() => query.value.status, reload);
+// Changing the page size returns to the first page (no `page` is sent).
+watch(() => query.value.per_page, reload);
 watch(() => query.value.domain, reload);
 
 function sort(field) {
@@ -292,7 +295,7 @@ function confirmDelete() {
                     <TableEmpty v-if="mailboxes.data.length === 0" :colspan="5">No mailboxes found.</TableEmpty>
                 </TableBody>
             </Table>
-            <Pagination :meta="mailboxes" />
+            <Pagination :meta="mailboxes" :sizes="[10, 20, 50, 100]" :per-page="query.per_page" @size="(n) => (query.per_page = n)" />
         </div>
 
         <AlertDialog :open="deleteTarget !== null" @update:open="(v) => !v && (deleteTarget = null)">

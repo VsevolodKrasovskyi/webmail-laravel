@@ -6,6 +6,7 @@ use App\Models\Alias;
 use App\Models\Domain;
 use App\Models\Mailbox;
 use App\Models\ScheduledEmail;
+use App\Support\PageSize;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -24,14 +25,6 @@ class AnalyticsService
     /**
      * @return Collection<int, array<string, mixed>>
      */
-    /** Page sizes the dashboard tables offer. */
-    public const PAGE_SIZES = [5, 10, 20, 50];
-
-    public static function pageSize(mixed $value): int
-    {
-        return in_array((int) $value, self::PAGE_SIZES, true) ? (int) $value : self::PAGE_SIZES[0];
-    }
-
     private function domainQuery()
     {
         return Domain::query()
@@ -66,12 +59,12 @@ class AnalyticsService
     }
 
     /**
-     * One page of the domain report, paged in the database (query parameter `domains_page`).
+     * One page of the domain report, paged in the database (query parameter `domains_page`, always 5 rows).
      */
-    public function domainsPage(int $perPage): LengthAwarePaginator
+    public function domainsPage(): LengthAwarePaginator
     {
         return $this->domainQuery()
-            ->paginate($perPage, ['*'], 'domains_page')
+            ->paginate(PageSize::DASHBOARD, ['*'], 'domains_page')
             ->through(fn (Domain $d) => $this->domainRow($d));
     }
 

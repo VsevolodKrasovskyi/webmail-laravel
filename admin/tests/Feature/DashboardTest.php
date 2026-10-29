@@ -101,7 +101,7 @@ class DashboardTest extends TestCase
             ->assertJsonPath('meta.to', 10);
     }
 
-    public function test_an_unknown_page_size_falls_back_to_five(): void
+    public function test_the_dashboard_page_size_is_always_five(): void
     {
         $domain = Domain::create(['name' => 'example.com']);
         foreach (range(1, 7) as $i) {
@@ -148,8 +148,9 @@ class DashboardTest extends TestCase
                 ->where('domains.last_page', 3)
                 ->where('domains.data.0.name', 'd06.test'));
 
+        // The dashboard size is fixed, a requested size is ignored.
         $this->actingAs(User::factory()->create())->get('/dashboard?domains_per_page=20')
-            ->assertInertia(fn ($page) => $page->has('domains.data', 12)->where('domains.per_page', 20));
+            ->assertInertia(fn ($page) => $page->has('domains.data', 5)->where('domains.per_page', 5));
     }
 
     public function test_guests_cannot_read_stats(): void

@@ -46,14 +46,13 @@ const totals = ref(null);
 const liveLoading = ref(false);
 const liveError = ref(null);
 const mailboxPage = ref(1);
-const mailboxSize = ref(5);
 let timer;
 
 async function loadRows(refresh = false) {
     if (! props.canReadMail || liveLoading.value) return;
     liveLoading.value = true;
     try {
-        const query = { page: mailboxPage.value, per_page: mailboxSize.value };
+        const query = { page: mailboxPage.value };
         if (refresh) query.refresh = 1;
         live.value = await fetchJson(MailboxStatsController({ query }));
         mailboxPage.value = live.value.meta.current_page;
@@ -85,17 +84,10 @@ function goMailboxPage(page) {
     loadRows();
 }
 
-function setMailboxSize(size) {
-    mailboxSize.value = size;
-    mailboxPage.value = 1;
-    loadRows();
-}
-
 // Domain report: paged in the database, reloaded as an Inertia partial visit.
 function visitDomains(params) {
     router.get(DashboardController.url(), {
         domains_page: props.domains.current_page,
-        domains_per_page: props.domains.per_page,
         ...params,
     }, { only: ['domains'], preserveState: true, preserveScroll: true, replace: true });
 }
@@ -369,7 +361,7 @@ function formatQuota(mb) {
                                 </TableRow>
                             </TableBody>
                         </Table>
-                        <PagerBar v-if="live" :meta="live.meta" @page="goMailboxPage" @size="setMailboxSize" />
+                        <PagerBar v-if="live" :meta="live.meta" :selectable="false" @page="goMailboxPage" />
                     </CardContent>
                 </Card>
 
@@ -489,7 +481,7 @@ function formatQuota(mb) {
                             </TableRow>
                         </TableBody>
                     </Table>
-                    <PagerBar :meta="domains" @page="(p) => visitDomains({ domains_page: p })" @size="(n) => visitDomains({ domains_per_page: n, domains_page: 1 })" />
+                    <PagerBar :meta="domains" :selectable="false" @page="(p) => visitDomains({ domains_page: p })" />
                 </CardContent>
             </Card>
         </div>
