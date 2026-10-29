@@ -43,6 +43,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       APP_DOMAIN: ${APP_DOMAIN}
       MAIL_DOMAIN: ${MAIL_DOMAIN}
+      TZ: ${APP_TIMEZONE:-UTC}
     ports:
       - "25:25"
       - "587:587"
@@ -69,6 +70,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DOVECOT_MASTER_PASSWORD: ${DOVECOT_MASTER_PASSWORD}
       APP_DOMAIN: ${APP_DOMAIN}
+      TZ: ${APP_TIMEZONE:-UTC}
     ports:
       - "143:143"
       - "993:993"
@@ -79,6 +81,8 @@ services:
   rspamd:
     image: rspamd/rspamd:latest
     restart: unless-stopped
+    environment:
+      TZ: ${APP_TIMEZONE:-UTC}
     depends_on:
       - redis
     volumes:

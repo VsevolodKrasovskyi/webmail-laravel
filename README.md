@@ -151,6 +151,7 @@ Two files, because two things read them. The root `.env` is for `docker-compose.
 | `APP_DOMAIN` | **The server's hostname**, for example `mail.example.com`. It is the MX target, the Postfix and Dovecot hostname and banner, the TLS certificate name (`/etc/letsencrypt/live/<APP_DOMAIN>/`) and where mail clients connect. Needs a public A/AAAA record and a matching PTR. Same in `admin/.env`. |
 | `MAIL_DOMAIN` | **A domain name for Postfix's own local mail**, for example `example.com` (Postfix `mydomain` and `myorigin`). It is only the sender domain of system messages such as bounces from the container. It does **not** define which domains you host, those are added in the panel under Domains. Use your main domain. |
 | `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | Creates the Postgres database and user, and is what Postfix and Dovecot use for their SQL lookups. Same in `admin/.env`. |
+| `APP_TIMEZONE` | Time zone of the mail containers (Postfix, Dovecot, Rspamd), so log times and the `Date` header of outgoing mail use it. Default `UTC`. Use the same value as in `admin/.env`. |
 | `DOVECOT_MASTER_PASSWORD` | Password of the Dovecot master user. Lets the panel open any mailbox in webmail and send scheduled mail without mailbox passwords. Same in `admin/.env`. |
 
 ### `admin/.env`

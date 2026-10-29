@@ -8,6 +8,7 @@ RUN apt-get update \
         openssl \
         ca-certificates \
         netcat-openbsd \
+        tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -g 5000 vmail && useradd -u 5000 -g vmail -s /usr/sbin/nologin -d /var/mail/vhosts vmail \
