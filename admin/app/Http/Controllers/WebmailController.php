@@ -8,6 +8,7 @@ use App\Services\WebmailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
 use Throwable;
@@ -157,11 +158,19 @@ class WebmailController extends Controller
         }
 
         try {
-            return response()->json([
-                'messages' => $this->webmail->listMessages(
-                    $credentials['email'], $credentials['password'], $folder, 50, $credentials['auth_user'] ?? null, $search,
-                ),
-            ]);
+            $messages = $this->webmail->listMessages(
+                $credentials['email'], $credentials['password'], $folder, 50, $credentials['auth_user'] ?? null, $search,
+            );
+
+            // "All mail" is everything except Junk and Trash: every IMAP folder plus the queued
+            // (scheduled) messages, which live in the database and not in IMAP.
+            if ($folder === WebmailService::ALL_MAIL) {
+                $messages = [...$messages, ...$this->scheduledItems($credentials['email'], $search)];
+                usort($messages, fn ($a, $b) => ($b['timestamp'] ?? 0) <=> ($a['timestamp'] ?? 0));
+                $messages = array_slice($messages, 0, 50);
+            }
+
+            return response()->json(['messages' => $messages]);
         } catch (Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -500,7 +509,9 @@ class WebmailController extends Controller
             'body' => $data['body'],
             'in_reply_to' => $data['in_reply_to'] ?? null,
             'attachments' => $data['attachments'] ?? [],
-            'send_at' => $data['send_at'],
+            // The browser sends UTC. Convert to the app time zone, because that is how the column is
+            // read back and compared with now() (storing the UTC clock time would send hours early).
+            'send_at' => Carbon::parse($data['send_at'])->setTimezone(config('app.timezone')),
             'status' => ScheduledEmail::PENDING,
         ]);
 
@@ -545,6 +556,7 @@ class WebmailController extends Controller
                 'to' => $m->to,
                 'date' => null,
                 'send_at' => $m->send_at->toIso8601String(),
+                'timestamp' => $m->send_at->getTimestamp(),
                 'status' => $m->status,
                 'seen' => true,
                 'thread_key' => 'scheduled:'.$m->id,

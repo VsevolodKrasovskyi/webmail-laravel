@@ -170,26 +170,97 @@ async function emptyCurrentFolder() {
     }
 }
 
+// ---- Drag and drop: move a message to another folder ----
 const dragItem = ref(null);
+const dragOverFolder = ref(null);
 
-function dragStart(item) {
+// Queued (scheduled) messages are not IMAP messages, so they cannot be moved.
+const canDrag = (item) => item.folder !== SCHEDULED;
+
+// Virtual folders (All mail, Scheduled) are views, and moving into the folder it is already in does nothing.
+function canDropOn(folder) {
+    const item = dragItem.value;
+    return !! item && ! folder.virtual && folder.name !== (item.folder ?? currentFolder.value);
+}
+
+function folderState(folder) {
+    if (! dragItem.value) return null;
+    if (! canDropOn(folder)) return 'blocked';
+    return dragOverFolder.value === folder.name ? 'over' : 'target';
+}
+
+const isDragging = (item) => dragItem.value?.uid === item.uid && dragItem.value?.folder === item.folder;
+
+// A small card that follows the pointer instead of the browser's faded copy of the row.
+function dragGhost(item) {
+    const ghost = document.createElement('div');
+    ghost.style.cssText = 'position:fixed;top:-300px;left:-300px;display:flex;align-items:center;gap:10px;max-width:300px;'
+        + 'padding:8px 14px 8px 8px;border-radius:14px;border:1px solid var(--border);background:var(--card);'
+        + 'color:var(--card-foreground);font:500 13px/1.25 Inter,system-ui,sans-serif;box-shadow:0 12px 32px rgba(0,0,0,.45)';
+
+    const badge = document.createElement('span');
+    badge.className = avatarColor(counterpart(item));
+    badge.style.cssText = 'display:flex;flex:none;align-items:center;justify-content:center;width:28px;height:28px;border-radius:9999px;color:#fff;font-size:11px;font-weight:600';
+    badge.textContent = initials(counterpart(item));
+
+    // textContent only: subjects and senders are untrusted.
+    const text = document.createElement('span');
+    text.style.cssText = 'display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    text.textContent = item.subject;
+
+    ghost.append(badge, text);
+    document.body.appendChild(ghost);
+    return ghost;
+}
+
+function onDragStart(event, item) {
+    if (! canDrag(item)) {
+        event.preventDefault();
+        return;
+    }
     dragItem.value = item;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', item.subject ?? '');
+    const ghost = dragGhost(item);
+    event.dataTransfer.setDragImage(ghost, 18, 18);
+    setTimeout(() => ghost.remove(), 0);
+}
+
+function onDragEnd() {
+    dragItem.value = null;
+    dragOverFolder.value = null;
+}
+
+function onFolderOver(event, folder) {
+    if (! canDropOn(folder)) {
+        event.dataTransfer.dropEffect = 'none';
+        return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    dragOverFolder.value = folder.name;
+}
+
+function onFolderLeave(event, folder) {
+    // Moving between the folder's own children also fires dragleave, ignore that.
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    if (dragOverFolder.value === folder.name) dragOverFolder.value = null;
 }
 
 async function dropOnFolder(targetPath) {
     const item = dragItem.value;
-    dragItem.value = null;
+    const target = folders.value.find((f) => f.name === targetPath);
+    onDragEnd();
     const uid = item?.uid;
     const from = item?.folder ?? currentFolder.value;
-    // Virtual folders (All mail, Scheduled) are views, not places to move into or out of.
-    if (! uid || targetPath === from || from === SCHEDULED || folders.value.find((f) => f.name === targetPath)?.virtual) {
+    if (! uid || ! target || target.virtual || targetPath === from || from === SCHEDULED) {
         return;
     }
     try {
         await fetchJson(WebmailController.moveMessage(uid), {
             body: { from, to: targetPath },
         });
-        toast.success('Message moved');
+        toast.success(`Moved to ${target.label}`);
         if (thread.value?.some((m) => m.uid === uid)) {
             thread.value = null;
         }
@@ -379,14 +450,20 @@ onMounted(() => {
                     <div
                         v-for="folder in folders"
                         :key="folder.name"
-                        class="group/folder flex shrink-0 items-center rounded-full transition"
-                        :class="currentFolder === folder.name ? 'bg-primary/10' : 'hover:bg-accent'"
-                        @dragover.prevent
-                        @drop="dropOnFolder(folder.name)"
+                        class="group/folder flex shrink-0 items-center rounded-full outline-offset-0 transition duration-150"
+                        :class="[
+                            currentFolder === folder.name ? 'bg-primary/10' : 'hover:bg-accent',
+                            folderState(folder) === 'target' ? 'bg-primary/5 outline-dashed outline-1 outline-primary/40' : '',
+                            folderState(folder) === 'over' ? 'scale-[1.03] bg-primary/15 shadow-sm outline outline-2 outline-primary' : '',
+                            folderState(folder) === 'blocked' ? 'opacity-40' : '',
+                        ]"
+                        @dragover="onFolderOver($event, folder)"
+                        @dragleave="onFolderLeave($event, folder)"
+                        @drop.prevent="dropOnFolder(folder.name)"
                     >
                         <button
                             @click="selectFolder(folder.name)"
-                            :title="folder.label"
+                            :title="folder.name === '__ALL__' ? 'All mail: inbox, sent, drafts, your folders and scheduled messages (not Junk or Trash)' : folder.label"
                             class="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left text-sm"
                             :class="[
                                 currentFolder === folder.name ? 'font-medium text-primary' : 'text-foreground/80',
@@ -439,15 +516,29 @@ onMounted(() => {
                             <EraserIcon class="size-4 text-destructive" />
                         </Button>
                     </div>
-                    <div class="min-h-0 flex-1 divide-y overflow-y-auto" :class="{ 'opacity-50': loadingMessages }">
+                    <div class="min-h-0 flex-1 overflow-y-auto" :class="{ 'opacity-50': loadingMessages }">
+                        <TransitionGroup
+                            tag="div"
+                            class="relative divide-y"
+                            enter-active-class="transition duration-200"
+                            enter-from-class="-translate-y-1 opacity-0"
+                            leave-active-class="absolute inset-x-0 transition duration-200"
+                            leave-to-class="translate-x-6 opacity-0"
+                            move-class="transition duration-200"
+                        >
                         <div
                             v-for="t in threads"
                             :key="t.key"
-                            draggable="true"
-                            @dragstart="dragStart(t.latest)"
+                            :draggable="canDrag(t.latest)"
+                            @dragstart="onDragStart($event, t.latest)"
+                            @dragend="onDragEnd"
                             @click="openThread(t.latest)"
-                            class="group flex cursor-pointer items-start gap-3 px-4 py-3 text-left transition hover:bg-accent"
-                            :class="{ 'bg-accent': thread?.some((m) => m.uid === t.latest.uid && m.folder === t.latest.folder) }"
+                            class="group flex items-start gap-3 bg-card px-4 py-3 text-left transition hover:bg-accent"
+                            :class="[
+                                canDrag(t.latest) ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
+                                isDragging(t.latest) ? 'opacity-40' : '',
+                                thread?.some((m) => m.uid === t.latest.uid && m.folder === t.latest.folder) ? 'bg-accent' : '',
+                            ]"
                         >
                             <span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white" :class="avatarColor(counterpart(t.latest))">
                                 {{ initials(counterpart(t.latest)) }}
@@ -480,6 +571,7 @@ onMounted(() => {
                                 <Trash2Icon class="size-4 text-destructive" />
                             </Button>
                         </div>
+                        </TransitionGroup>
                         <div v-if="! loadingMessages && threads.length === 0" class="flex flex-col items-center gap-2 px-4 py-16 text-center text-sm text-muted-foreground">
                             <MailIcon class="size-8 text-muted-foreground/40" />
                             No messages in this folder.
@@ -621,5 +713,21 @@ onMounted(() => {
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>
+        <!-- While dragging a message: a hint, shown on screens where drag and drop is available -->
+        <Transition
+            enter-active-class="transition duration-200"
+            enter-from-class="translate-y-2 opacity-0"
+            leave-active-class="transition duration-150"
+            leave-to-class="translate-y-2 opacity-0"
+        >
+            <div
+                v-if="dragItem"
+                class="pointer-events-none fixed bottom-6 left-1/2 z-50 hidden max-w-[28rem] -translate-x-1/2 items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm shadow-lg lg:flex"
+            >
+                <FolderIcon class="size-4 shrink-0 text-primary" />
+                <span class="shrink-0">Drop on a folder to move</span>
+                <span class="truncate text-muted-foreground">{{ dragItem.subject }}</span>
+            </div>
+        </Transition>
     </AppLayout>
 </template>

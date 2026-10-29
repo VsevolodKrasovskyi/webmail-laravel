@@ -10,7 +10,7 @@ Self-hosted mail server with a web admin panel and webmail.
 
 - Domains, mailboxes and aliases (including catch-all) with per-mailbox quota.
 - Automatic DKIM key generation per domain, optional DNS sync through Cloudflare.
-- Webmail: threads, search, folders, drag and drop, Cc/Bcc, rich text, attachments, inline images, drafts with autosave, an "All mail" view and scheduled sending.
+- Webmail: threads, search, folders, drag and drop, Cc/Bcc, rich text, attachments, inline images, drafts with autosave, an "All mail" view (every folder and the scheduled queue, except Junk and Trash) and scheduled sending.
 - Admin shortcut that opens any mailbox's webmail without its password (Dovecot master user).
 - Dashboard with live message counts per mailbox and an unread notification, growth charts, setup health, scheduled sending stats and a domain report.
 - Google-only sign-in for admins listed in `ADMIN_EMAIL`, no passwords stored or seeded.
