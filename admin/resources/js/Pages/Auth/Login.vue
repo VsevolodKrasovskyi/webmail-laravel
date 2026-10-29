@@ -1,9 +1,8 @@
 <script setup>
 import { Head, usePage } from '@inertiajs/vue3';
-import GoogleAuthController from '@/actions/App/Http/Controllers/Auth/GoogleAuthController';
 import { MailIcon } from '@lucide/vue';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import GoogleButton from '@/components/GoogleButton.vue';
 
 defineProps({
     googleConfigured: Boolean,
@@ -29,9 +28,7 @@ const page = usePage();
                     {{ page.props.flash.error }}
                 </p>
 
-                <a v-if="googleConfigured && adminConfigured" :href="GoogleAuthController.redirect.url()" class="block">
-                    <Button type="button" class="w-full">Sign in with Google</Button>
-                </a>
+                <GoogleButton v-if="googleConfigured && adminConfigured" />
             </CardContent>
         </Card>
     </div>
