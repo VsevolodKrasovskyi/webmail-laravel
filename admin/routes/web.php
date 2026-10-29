@@ -7,6 +7,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DomainController;
 use App\Http\Controllers\MailboxController;
 use App\Http\Controllers\MailboxStatsController;
+use App\Http\Controllers\MailboxTotalsController;
 use App\Http\Controllers\WebmailController;
 use Illuminate\Support\Facades\Route;
 
@@ -24,6 +25,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
 
     Route::get('/dashboard/mailbox-stats', MailboxStatsController::class)->name('dashboard.mailbox-stats');
+    Route::get('/dashboard/mailbox-totals', MailboxTotalsController::class)->name('dashboard.mailbox-totals');
 
     Route::resource('domains', DomainController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::post('/domains/{domain}/dns', [DomainController::class, 'syncDns'])->name('domains.dns');

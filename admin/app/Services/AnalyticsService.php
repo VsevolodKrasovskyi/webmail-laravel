@@ -6,6 +6,7 @@ use App\Models\Alias;
 use App\Models\Domain;
 use App\Models\Mailbox;
 use App\Models\ScheduledEmail;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -23,21 +24,55 @@ class AnalyticsService
     /**
      * @return Collection<int, array<string, mixed>>
      */
-    public function domainRows(): Collection
+    /** Page sizes the dashboard tables offer. */
+    public const PAGE_SIZES = [5, 10, 20, 50];
+
+    public static function pageSize(mixed $value): int
+    {
+        return in_array((int) $value, self::PAGE_SIZES, true) ? (int) $value : self::PAGE_SIZES[0];
+    }
+
+    private function domainQuery()
     {
         return Domain::query()
             ->withCount(['mailboxes', 'aliases'])
             ->withSum('mailboxes as quota_mb', 'quota_mb')
-            ->orderBy('name')
-            ->get()
-            ->map(fn (Domain $d) => [
-                'name' => $d->name,
-                'is_active' => $d->is_active,
-                'mailboxes' => $d->mailboxes_count,
-                'aliases' => $d->aliases_count,
-                'quota_mb' => (int) $d->quota_mb,
-                'has_dkim' => filled($d->dkim_public_key),
-            ]);
+            ->orderBy('name');
+    }
+
+    /**
+     * @return array{name:string, is_active:bool, mailboxes:int, aliases:int, quota_mb:int, has_dkim:bool}
+     */
+    private function domainRow(Domain $d): array
+    {
+        return [
+            'name' => $d->name,
+            'is_active' => $d->is_active,
+            'mailboxes' => $d->mailboxes_count,
+            'aliases' => $d->aliases_count,
+            'quota_mb' => (int) $d->quota_mb,
+            'has_dkim' => filled($d->dkim_public_key),
+        ];
+    }
+
+    /**
+     * Every domain, for the health checks and the top list.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function domainRows(): Collection
+    {
+        return $this->domainQuery()->get()->map(fn (Domain $d) => $this->domainRow($d));
+    }
+
+    /**
+     * One page of the domain report, paged in the database (query parameter `domains_page`).
+     */
+    public function domainsPage(int $perPage): LengthAwarePaginator
+    {
+        return $this->domainQuery()
+            ->paginate($perPage, ['*'], 'domains_page')
+            ->through(fn (Domain $d) => $this->domainRow($d));
     }
 
     /**

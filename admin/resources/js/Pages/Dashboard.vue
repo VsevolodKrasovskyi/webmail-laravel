@@ -16,7 +16,8 @@ import BarChart from '@/components/BarChart.vue';
 import MailboxAvatar from '@/components/MailboxAvatar.vue';
 import { fetchJson } from '../fetchJson';
 import PagerBar from '@/components/PagerBar.vue';
-import { usePager } from '@/lib/usePager';
+import DashboardController from '@/actions/App/Http/Controllers/DashboardController';
+import MailboxTotalsController from '@/actions/App/Http/Controllers/MailboxTotalsController';
 import { Card, CardHeader, CardTitle, CardDescription, CardAction, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -29,7 +30,8 @@ const props = defineProps({
     quota: Object,
     attention: Object,
     growth: Array,
-    domains: Array,
+    domains: Object,
+    top_domains: Array,
     scheduled: Object,
     canReadMail: Boolean,
 });
@@ -37,22 +39,65 @@ const props = defineProps({
 const page = usePage();
 
 // ---- Live message counts (read from Dovecot after the page has rendered) ----
-const live = ref(null);
+// The table is one page of mailboxes (the controller pages it, so only that page is read over IMAP),
+// the totals (unread notification, Messages card) are a separate call over every mailbox.
+const live = ref(null); // { mailboxes, meta } for the current page
+const totals = ref(null);
 const liveLoading = ref(false);
 const liveError = ref(null);
+const mailboxPage = ref(1);
+const mailboxSize = ref(5);
 let timer;
 
-async function loadLive(refresh = false) {
+async function loadRows(refresh = false) {
     if (! props.canReadMail || liveLoading.value) return;
     liveLoading.value = true;
     try {
-        live.value = await fetchJson(MailboxStatsController(refresh ? { query: { refresh: 1 } } : undefined));
+        const query = { page: mailboxPage.value, per_page: mailboxSize.value };
+        if (refresh) query.refresh = 1;
+        live.value = await fetchJson(MailboxStatsController({ query }));
+        mailboxPage.value = live.value.meta.current_page;
         liveError.value = null;
     } catch (e) {
         liveError.value = e.message;
     } finally {
         liveLoading.value = false;
     }
+}
+
+async function loadTotals(refresh = false) {
+    if (! props.canReadMail) return;
+    try {
+        totals.value = await fetchJson(MailboxTotalsController(refresh ? { query: { refresh: 1 } } : undefined));
+    } catch (e) {
+        liveError.value = liveError.value ?? e.message;
+    }
+}
+
+// Rows first so the table shows quickly, then the totals.
+async function loadLive(refresh = false) {
+    await loadRows(refresh);
+    await loadTotals(refresh);
+}
+
+function goMailboxPage(page) {
+    mailboxPage.value = page;
+    loadRows();
+}
+
+function setMailboxSize(size) {
+    mailboxSize.value = size;
+    mailboxPage.value = 1;
+    loadRows();
+}
+
+// Domain report: paged in the database, reloaded as an Inertia partial visit.
+function visitDomains(params) {
+    router.get(DashboardController.url(), {
+        domains_page: props.domains.current_page,
+        domains_per_page: props.domains.per_page,
+        ...params,
+    }, { only: ['domains'], preserveState: true, preserveScroll: true, replace: true });
 }
 
 onMounted(() => {
@@ -65,12 +110,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => clearInterval(timer));
 
-const unreadTotal = computed(() => live.value?.unread_total ?? 0);
-
-// Both tables show 5 rows per page by default, and the size can be changed. All mailboxes are still
-// read (the totals above need every one), the pages only split the table.
-const mailboxPager = usePager(computed(() => live.value?.mailboxes ?? []), 5);
-const domainPager = usePager(computed(() => props.domains), 5);
+const unreadTotal = computed(() => totals.value?.unread_total ?? 0);
 
 // ---- Header ----
 const user = computed(() => page.props.auth.user);
@@ -129,7 +169,7 @@ const sentDaily = computed(() => props.scheduled.daily.map((d) => ({
     tooltip: `${d.day}: ${d.sent} sent, ${d.failed} failed`,
 })));
 
-const topDomains = computed(() => [...props.domains].sort((a, b) => b.mailboxes - a.mailboxes).slice(0, 10));
+const topDomains = computed(() => props.top_domains);
 const maxMailboxes = computed(() => Math.max(1, ...topDomains.value.map((d) => d.mailboxes)));
 const status = computed(() => props.scheduled.by_status ?? {});
 
@@ -188,7 +228,7 @@ function formatQuota(mb) {
                             </span>
                             <span class="min-w-0">
                                 <span class="block text-xs text-muted-foreground">Unread</span>
-                                <span v-if="live" class="block text-xl font-semibold leading-tight tabular-nums">{{ unreadTotal }}</span>
+                                <span v-if="totals" class="block text-xl font-semibold leading-tight tabular-nums">{{ unreadTotal }}</span>
                                 <span v-else class="block text-sm text-muted-foreground">{{ liveLoading ? 'Checking...' : 'n/a' }}</span>
                             </span>
                         </Link>
@@ -237,9 +277,9 @@ function formatQuota(mb) {
                     </CardHeader>
                     <CardContent class="px-4 sm:px-6">
                         <p v-if="! canReadMail" class="text-sm text-muted-foreground">Set DOVECOT_MASTER_PASSWORD to count messages.</p>
-                        <template v-else-if="live">
-                            <p class="text-2xl font-semibold tracking-tight sm:text-3xl">{{ live.messages_total }}</p>
-                            <p class="mt-1 text-xs text-muted-foreground sm:mt-2 sm:text-sm">{{ live.unread_total }} unread</p>
+                        <template v-else-if="totals">
+                            <p class="text-2xl font-semibold tracking-tight sm:text-3xl">{{ totals.messages_total }}</p>
+                            <p class="mt-1 text-xs text-muted-foreground sm:mt-2 sm:text-sm">{{ totals.unread_total }} unread</p>
                         </template>
                         <p v-else class="text-sm text-muted-foreground">{{ liveError ?? 'Loading...' }}</p>
                     </CardContent>
@@ -265,9 +305,9 @@ function formatQuota(mb) {
                         </p>
                         <p v-else-if="liveError && ! live" class="py-6 text-center text-sm text-destructive">{{ liveError }}</p>
                         <p v-else-if="! live" class="py-6 text-center text-sm text-muted-foreground">Reading mailboxes...</p>
-                        <p v-else-if="! live.mailboxes.length" class="py-6 text-center text-sm text-muted-foreground">No active mailboxes yet.</p>
+                        <p v-else-if="! live.meta.total" class="py-6 text-center text-sm text-muted-foreground">No active mailboxes yet.</p>
                         <div v-else class="divide-y sm:hidden">
-                            <div v-for="row in mailboxPager.items.value" :key="row.id" class="flex items-center gap-3 py-3">
+                            <div v-for="row in live.mailboxes" :key="row.id" class="flex items-center gap-3 py-3">
                                 <MailboxAvatar :email="row.email" :name="row.name" size="sm" />
                                 <div class="min-w-0 flex-1">
                                     <p class="break-all text-sm font-medium">{{ row.email }}</p>
@@ -296,7 +336,7 @@ function formatQuota(mb) {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                <TableRow v-for="row in mailboxPager.items.value" :key="row.id">
+                                <TableRow v-for="row in live.mailboxes" :key="row.id">
                                     <TableCell>
                                         <div class="flex items-center gap-3">
                                             <MailboxAvatar :email="row.email" :name="row.name" size="sm" />
@@ -329,7 +369,7 @@ function formatQuota(mb) {
                                 </TableRow>
                             </TableBody>
                         </Table>
-                        <PagerBar v-if="live" :pager="mailboxPager" />
+                        <PagerBar v-if="live" :meta="live.meta" @page="goMailboxPage" @size="setMailboxSize" />
                     </CardContent>
                 </Card>
 
@@ -410,8 +450,8 @@ function formatQuota(mb) {
                 </CardHeader>
                 <CardContent>
                     <div class="divide-y sm:hidden">
-                        <p v-if="! domains.length" class="py-6 text-center text-sm text-muted-foreground">No domains yet.</p>
-                        <div v-for="d in domainPager.items.value" :key="d.name" class="py-3">
+                        <p v-if="! domains.data.length" class="py-6 text-center text-sm text-muted-foreground">No domains yet.</p>
+                        <div v-for="d in domains.data" :key="d.name" class="py-3">
                             <div class="flex items-start justify-between gap-3">
                                 <p class="break-all text-sm font-medium">{{ d.name }}</p>
                                 <Badge class="shrink-0" :variant="d.is_active ? 'secondary' : 'outline'">{{ d.is_active ? 'active' : 'inactive' }}</Badge>
@@ -434,7 +474,7 @@ function formatQuota(mb) {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            <TableRow v-for="d in domainPager.items.value" :key="d.name">
+                            <TableRow v-for="d in domains.data" :key="d.name">
                                 <TableCell class="font-medium">{{ d.name }}</TableCell>
                                 <TableCell class="text-right tabular-nums">{{ d.mailboxes }}</TableCell>
                                 <TableCell class="text-right tabular-nums">{{ d.aliases }}</TableCell>
@@ -444,12 +484,12 @@ function formatQuota(mb) {
                                     <Badge :variant="d.is_active ? 'secondary' : 'outline'">{{ d.is_active ? 'active' : 'inactive' }}</Badge>
                                 </TableCell>
                             </TableRow>
-                            <TableRow v-if="! domains.length">
+                            <TableRow v-if="! domains.data.length">
                                 <TableCell colspan="6" class="py-8 text-center text-muted-foreground">No domains yet.</TableCell>
                             </TableRow>
                         </TableBody>
                     </Table>
-                    <PagerBar :pager="domainPager" />
+                    <PagerBar :meta="domains" @page="(p) => visitDomains({ domains_page: p })" @size="(n) => visitDomains({ domains_per_page: n, domains_page: 1 })" />
                 </CardContent>
             </Card>
         </div>
