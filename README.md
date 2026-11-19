@@ -13,7 +13,8 @@ Self-hosted mail server with a web admin panel and webmail.
 - Webmail: threads, search, folders, drag and drop, Cc/Bcc, rich text, attachments, inline images, drafts with autosave, an "All mail" view (every folder and the scheduled queue, except Junk and Trash) and scheduled sending.
 - Admin shortcut that opens any mailbox's webmail without its password (Dovecot master user).
 - Dashboard with live message counts per mailbox and an unread notification, growth charts, setup health, scheduled sending stats and a domain report.
-- Google-only sign-in for admins listed in `ADMIN_EMAIL`, no passwords stored or seeded.
+- Sign-in with a password or with Google, optional two-factor authentication (authenticator app and recovery codes), e-mail verification and password reset.
+- Users join by invitation. Addresses in `ADMIN_EMAIL` are administrators with every domain and mailbox, an invited user gets whole domains or single mailboxes.
 - Responsive layout for phones.
 
 ## Architecture
@@ -170,8 +171,9 @@ Only variables that differ from the framework defaults are in `admin/.env.exampl
 | `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | Same as the root `.env`. |
 | `APP_DOMAIN` | Same as the root `.env`. Used as the MX target when syncing DNS. |
 | `DOVECOT_MASTER_PASSWORD` | Same as the root `.env`. |
-| `ADMIN_EMAIL` | Google addresses allowed to sign in, comma-separated (`a@example.com,b@example.com`). The admin user is created on the first sign-in. An address removed from the list can no longer log in. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client. Required, there is no other way to log in. |
+| `ADMIN_EMAIL` | Administrator addresses, comma-separated (`a@example.com,b@example.com`). They see every domain and mailbox and manage users. The user is created on the first Google sign-in. An address removed from the list loses the admin rights. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client. Without it nobody can create the first administrator, because a password can only be set after the account exists. |
+| `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` | System e-mail (invitations, verification, password reset) goes through this stack's own Postfix. Use `MAIL_MAILER=postfix` and a `MAIL_FROM_ADDRESS` that is an existing mailbox, for example `noreply@example.com`. The panel signs in as that mailbox with the Dovecot master user, no mailbox password is stored. |
 | `SESSION_SECURE_COOKIE` | `true` when the panel is served over HTTPS. With `false` on HTTPS or `true` on plain HTTP the login loops. |
 | `CLOUDFLARE_API_TOKEN` | Optional. Enables "Sync DNS" on the Domains page. |
 
@@ -189,11 +191,11 @@ These work without being set. Add them to `admin/.env` only to change the defaul
 | `LOG_LEVEL` | `debug` | Use `error` in production. Logs go to `storage/logs/laravel.log`. |
 | `INERTIA_SSR_ENABLED` | `false` | There is no SSR bundle. |
 
-Everything else (sessions, cache and queue in the database, the default mailer, locale) uses Laravel's defaults. The panel does not send mail through Laravel, so `MAIL_*` is not needed.
+Everything else (sessions, cache and queue in the database, locale) uses Laravel's defaults.
 
-## Sign in with Google
+## Sign-in, two-factor authentication and users
 
-Google is the only way into the panel, there are no passwords. Only accounts whose **verified** Google email is listed in `ADMIN_EMAIL` are let in, and the admin user is created automatically on the first sign-in.
+**First administrator.** Set `ADMIN_EMAIL`, `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, then sign in with Google. The account is created on the first sign-in with a verified Google address from `ADMIN_EMAIL`. To use a password as well, press **Forgot password?** on the login page. The link goes to the same address and sets the first password.
 
 1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials) create an **OAuth client ID** of type **Web application**.
 2. Add this **Authorized redirect URI**. It is always your `APP_URL` plus `/auth/google/callback`, scheme included, for example:
@@ -205,10 +207,29 @@ Google is the only way into the panel, there are no passwords. Only accounts who
    ADMIN_EMAIL=you@example.com
    GOOGLE_CLIENT_ID=...
    GOOGLE_CLIENT_SECRET=...
+   MAIL_MAILER=postfix
+   MAIL_FROM_ADDRESS=noreply@example.com
    ```
-4. Run `php artisan config:clear` and open the panel. Click **Sign in with Google**.
+4. Create the mailbox from `MAIL_FROM_ADDRESS` in the panel, run `php artisan config:clear` and open the panel.
 
-If the Google client is deleted or misconfigured nobody can sign in. Fix it in `admin/.env`, there is no password fallback by design. Anyone who controls an address in `ADMIN_EMAIL` controls the panel, so protect those Google accounts with 2-step verification.
+**Two-factor authentication is optional.** A user turns it on in the account menu (**Two-factor authentication**), scans a QR code with an authenticator app and gets 8 recovery codes, each works once. After that a code is asked once per session, for a password sign-in and for Google alike. Turning it off needs a current or a recovery code. An administrator can reset the second factor of a user on the **Users** page.
+
+**Users join by invitation, and only administrators invite.** On **Users** an administrator enters an e-mail and picks what the user gets:
+
+| Access | What the user can do |
+|---|---|
+| Domain | Everything on that domain: the domain itself (enable, disable, delete, DNS), its mailboxes and aliases. Adding a new domain stays with administrators. |
+| Single mailbox | See the mailbox, open it in webmail, change its name and password. Quota, enabling and deleting need the domain. |
+
+The invited user gets a link valid for 7 days, sets a name and a password, then signs in. The link also confirms the e-mail address. An invited address can sign in with Google instead, if it is the same address. Domain and mailbox access can be changed later, and **Resend** issues a new link.
+
+**Locked out.** If a user with two-factor authentication loses the phone and the recovery codes, an administrator resets it on the Users page. If that is the only administrator, reset the second factor from a console:
+
+```bash
+php artisan tinker --execute="App\\Models\\User::where('email', 'you@example.com')->update(['two_factor_secret' => null, 'two_factor_recovery_codes' => null, 'two_factor_confirmed_at' => null]);"
+```
+
+Anyone who controls an address in `ADMIN_EMAIL` controls the panel, so protect those mailboxes and Google accounts.
 
 ## Connect a mail client
 

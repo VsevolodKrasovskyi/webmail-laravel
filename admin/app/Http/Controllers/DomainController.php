@@ -3,10 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Domain;
-use App\Support\PageSize;
 use App\Services\CloudflareService;
+use App\Support\PageSize;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 use Throwable;
@@ -19,7 +20,7 @@ class DomainController extends Controller
     {
         $filters = $request->only(['search', 'status', 'sort', 'direction']);
 
-        $query = Domain::withCount(['mailboxes', 'aliases']);
+        $query = Domain::visibleTo($request->user())->withCount(['mailboxes', 'aliases']);
 
         if (filled($filters['search'] ?? null)) {
             $query->where('name', 'ilike', '%'.$filters['search'].'%');
@@ -48,6 +49,8 @@ class DomainController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        Gate::authorize('create', Domain::class);
+
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255', 'unique:domains,name'],
         ]);
@@ -59,6 +62,8 @@ class DomainController extends Controller
 
     public function update(Request $request, Domain $domain): RedirectResponse
     {
+        Gate::authorize('update', $domain);
+
         $data = $request->validate([
             'is_active' => ['required', 'boolean'],
         ]);
@@ -70,6 +75,8 @@ class DomainController extends Controller
 
     public function destroy(Domain $domain): RedirectResponse
     {
+        Gate::authorize('delete', $domain);
+
         $domain->delete();
 
         return back()->with('success', 'Domain deleted.');
@@ -77,6 +84,8 @@ class DomainController extends Controller
 
     public function syncDns(Domain $domain): RedirectResponse
     {
+        Gate::authorize('update', $domain);
+
         try {
             $log = $this->cloudflare->syncMailRecords(
                 $domain->name,

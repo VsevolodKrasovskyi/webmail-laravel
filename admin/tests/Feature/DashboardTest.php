@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\Domain;
 use App\Models\Mailbox;
-use App\Models\User;
 use App\Services\WebmailService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
@@ -27,7 +26,7 @@ class DashboardTest extends TestCase
         $this->seedMailboxes();
         config(['mail_server.dovecot_master_password' => null]);
 
-        $this->actingAs(User::factory()->create())
+        $this->actingAsAdmin()
             ->get('/dashboard')
             ->assertOk()
             ->assertInertia(fn ($page) => $page
@@ -43,14 +42,14 @@ class DashboardTest extends TestCase
 
     public function test_the_analytics_page_is_gone(): void
     {
-        $this->actingAs(User::factory()->create())->get('/analytics')->assertNotFound();
+        $this->actingAsAdmin()->get('/analytics')->assertNotFound();
     }
 
     public function test_mailbox_stats_need_the_master_password(): void
     {
         config(['mail_server.dovecot_master_password' => null]);
 
-        $this->actingAs(User::factory()->create())->getJson('/dashboard/mailbox-stats')->assertStatus(422);
+        $this->actingAsAdmin()->getJson('/dashboard/mailbox-stats')->assertStatus(422);
     }
 
     public function test_mailbox_stats_are_paged_and_survive_a_broken_mailbox(): void
@@ -67,7 +66,7 @@ class DashboardTest extends TestCase
             ->andThrow(new \RuntimeException('connection refused'));
         $this->app->instance(WebmailService::class, $service);
 
-        $response = $this->actingAs(User::factory()->create())->getJson('/dashboard/mailbox-stats');
+        $response = $this->actingAsAdmin()->getJson('/dashboard/mailbox-stats');
 
         $response->assertOk()
             ->assertJsonCount(2, 'mailboxes') // the inactive mailbox is not read
@@ -91,7 +90,7 @@ class DashboardTest extends TestCase
         $service->shouldReceive('mailboxStats')->times(5)->andReturn(['inbox' => 1, 'unread' => 1, 'total' => 1]);
         $this->app->instance(WebmailService::class, $service);
 
-        $this->actingAs(User::factory()->create())->getJson('/dashboard/mailbox-stats?page=2&per_page=5')
+        $this->actingAsAdmin()->getJson('/dashboard/mailbox-stats?page=2&per_page=5')
             ->assertOk()
             ->assertJsonCount(5, 'mailboxes')
             ->assertJsonPath('mailboxes.0.email', 'm06@example.com')
@@ -112,7 +111,7 @@ class DashboardTest extends TestCase
         $service->shouldReceive('mailboxStats')->andReturn(['inbox' => 0, 'unread' => 0, 'total' => 0]);
         $this->app->instance(WebmailService::class, $service);
 
-        $this->actingAs(User::factory()->create())->getJson('/dashboard/mailbox-stats?per_page=9999')
+        $this->actingAsAdmin()->getJson('/dashboard/mailbox-stats?per_page=9999')
             ->assertJsonPath('meta.per_page', 5)
             ->assertJsonCount(5, 'mailboxes');
     }
@@ -126,7 +125,7 @@ class DashboardTest extends TestCase
         $service->shouldReceive('mailboxStats')->andReturn(['inbox' => 3, 'unread' => 2, 'total' => 7]);
         $this->app->instance(WebmailService::class, $service);
 
-        $this->actingAs(User::factory()->create())->getJson('/dashboard/mailbox-totals')
+        $this->actingAsAdmin()->getJson('/dashboard/mailbox-totals')
             ->assertOk()
             ->assertJsonPath('mailboxes', 2)
             ->assertJsonPath('unread_total', 4)
@@ -141,7 +140,7 @@ class DashboardTest extends TestCase
         }
         config(['mail_server.dovecot_master_password' => null]);
 
-        $this->actingAs(User::factory()->create())->get('/dashboard?domains_page=2&domains_per_page=5')
+        $this->actingAsAdmin()->get('/dashboard?domains_page=2&domains_per_page=5')
             ->assertInertia(fn ($page) => $page
                 ->has('domains.data', 5)
                 ->where('domains.current_page', 2)
@@ -149,7 +148,7 @@ class DashboardTest extends TestCase
                 ->where('domains.data.0.name', 'd06.test'));
 
         // The dashboard size is fixed, a requested size is ignored.
-        $this->actingAs(User::factory()->create())->get('/dashboard?domains_per_page=20')
+        $this->actingAsAdmin()->get('/dashboard?domains_per_page=20')
             ->assertInertia(fn ($page) => $page->has('domains.data', 5)->where('domains.per_page', 5));
     }
 

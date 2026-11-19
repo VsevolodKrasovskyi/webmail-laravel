@@ -2,7 +2,7 @@
 import { Head } from '@inertiajs/vue3';
 import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import { ref, watch } from 'vue';
-import { useForm, router } from '@inertiajs/vue3';
+import { useForm, router, usePage } from '@inertiajs/vue3';
 import { PlusIcon, Trash2Icon, CloudIcon, CopyIcon, CheckIcon } from '@lucide/vue';
 import { toast } from 'vue-sonner';
 import AppLayout from '../../Layouts/AppLayout.vue';
@@ -23,6 +23,8 @@ import {
     AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
     AlertDialogDescription, AlertDialogFooter, AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
+
+const page = usePage();
 
 const props = defineProps({
     domains: Object,
@@ -140,7 +142,7 @@ function syncDns(domain) {
         <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-xl font-semibold">Domains</h2>
             <Dialog v-model:open="createOpen">
-                <Button @click="createOpen = true">
+                <Button v-if="page.props.auth.user.is_admin" @click="createOpen = true">
                     <PlusIcon class="size-4" />
                     Add domain
                 </Button>

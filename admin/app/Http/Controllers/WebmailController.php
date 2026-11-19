@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 use Inertia\Response;
 use Throwable;
@@ -116,6 +117,8 @@ class WebmailController extends Controller
      */
     public function loginAsMailbox(Request $request, Mailbox $mailbox): RedirectResponse
     {
+        Gate::authorize('update', $mailbox);
+
         $masterPassword = config('mail_server.dovecot_master_password');
 
         if (blank($masterPassword)) {

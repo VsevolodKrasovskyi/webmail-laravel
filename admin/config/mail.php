@@ -14,7 +14,7 @@ return [
     |
     */
 
-    'default' => env('MAIL_MAILER', 'log'),
+    'default' => env('MAIL_MAILER', 'postfix'),
 
     /*
     |--------------------------------------------------------------------------
@@ -46,6 +46,22 @@ return [
             'username' => env('MAIL_USERNAME'),
             'password' => env('MAIL_PASSWORD'),
             'timeout' => null,
+            'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
+        ],
+
+        // The panel's own Postfix (implicit TLS on 465). It signs in with the Dovecot master user
+        // as the sender mailbox, the same way webmail does, so no mailbox password is stored.
+        // MAIL_FROM_ADDRESS must be an existing mailbox of the stack.
+        'postfix' => [
+            'transport' => 'smtp',
+            'scheme' => 'smtps',
+            'host' => env('SMTP_HOST', '127.0.0.1'),
+            'port' => 465,
+            'username' => env('MAIL_USERNAME', env('MAIL_FROM_ADDRESS', 'hello@example.com').'*'.env('DOVECOT_MASTER_USER', 'admin')),
+            'password' => env('MAIL_PASSWORD', env('DOVECOT_MASTER_PASSWORD')),
+            // Connected by 127.0.0.1, the certificate is issued for the public host name.
+            'verify_peer' => false,
+            'timeout' => 15,
             'local_domain' => env('MAIL_EHLO_DOMAIN', parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST)),
         ],
 

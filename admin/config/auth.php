@@ -26,6 +26,7 @@ return [
 
     'defaults' => [
         'guard' => env('AUTH_GUARD', 'web'),
+        'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),
     ],
 
     /*
@@ -80,5 +81,19 @@ return [
         //     'table' => 'users',
         // ],
     ],
+
+    /*
+    | Password reset links: valid for `expire` minutes, one e-mail per `throttle` seconds.
+    */
+    'passwords' => [
+        'users' => [
+            'provider' => 'users',
+            'table' => 'password_reset_tokens',
+            'expire' => 60,
+            'throttle' => 60,
+        ],
+    ],
+
+    'password_timeout' => 10800,
 
 ];

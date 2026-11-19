@@ -3,8 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Mailbox;
-use App\Support\PageSize;
 use App\Services\MailboxStatsReader;
+use App\Support\PageSize;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -20,7 +20,7 @@ class MailboxStatsController extends Controller
             return response()->json(['error' => 'Set DOVECOT_MASTER_PASSWORD to read message counts.'], 422);
         }
 
-        $page = Mailbox::where('is_active', true)
+        $page = Mailbox::visibleTo($request->user())->where('is_active', true)
             ->orderBy('email')
             ->paginate(PageSize::DASHBOARD);
 

@@ -30,6 +30,7 @@ import {
 const props = defineProps({
     mailboxes: Object,
     domains: Array,
+    createDomains: Array,
     webmailImpersonationEnabled: Boolean,
     filters: Object,
 });
@@ -86,7 +87,7 @@ const createOpen = ref(false);
 // (active) domains, so an address on an unknown domain cannot even be typed.
 const form = useForm({
     local: '',
-    domain: props.domains[0] ?? '',
+    domain: props.createDomains[0] ?? '',
     password: '',
     name: '',
     quota_mb: 3072,
@@ -103,10 +104,10 @@ function cleanLocal() {
 function openCreate() {
     form.clearErrors();
     // Preselect the domain currently used as a filter.
-    if (props.filters.domain && props.filters.domain !== 'all' && props.domains.includes(props.filters.domain)) {
+    if (props.filters.domain && props.filters.domain !== 'all' && props.createDomains.includes(props.filters.domain)) {
         form.domain = props.filters.domain;
-    } else if (! props.domains.includes(form.domain)) {
-        form.domain = props.domains[0] ?? '';
+    } else if (! props.createDomains.includes(form.domain)) {
+        form.domain = props.createDomains[0] ?? '';
     }
     createOpen.value = true;
 }
@@ -165,7 +166,7 @@ function confirmDelete() {
         <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-xl font-semibold">Mailboxes</h2>
             <Dialog v-model:open="createOpen">
-                <Button @click="openCreate">
+                <Button v-if="createDomains.length || $page.props.auth.user.is_admin" @click="openCreate">
                     <PlusIcon class="size-4" />
                     Add mailbox
                 </Button>
@@ -173,7 +174,7 @@ function confirmDelete() {
                     <DialogHeader>
                         <DialogTitle>Add mailbox</DialogTitle>
                     </DialogHeader>
-                    <p v-if="! domains.length" class="rounded-md bg-muted px-3 py-3 text-sm text-muted-foreground">
+                    <p v-if="! createDomains.length" class="rounded-md bg-muted px-3 py-3 text-sm text-muted-foreground">
                         There are no active domains yet. A mailbox can only be created on an existing domain,
                         <Link :href="DomainController.index.url()" class="text-foreground underline underline-offset-4" @click="createOpen = false">add a domain</Link>
                         first.
@@ -201,7 +202,7 @@ function confirmDelete() {
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem v-for="domain in domains" :key="domain" :value="domain">{{ domain }}</SelectItem>
+                                        <SelectItem v-for="domain in createDomains" :key="domain" :value="domain">{{ domain }}</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -274,7 +275,7 @@ function confirmDelete() {
                                     <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-normal text-muted-foreground md:hidden">
                                         <span v-if="mailbox.name">{{ mailbox.name }}</span>
                                         <span>{{ mailbox.quota_mb }} MB</span>
-                                        <span class="flex items-center gap-1.5 sm:hidden">
+                                        <span v-if="mailbox.can_manage" class="flex items-center gap-1.5 sm:hidden">
                                             <Switch :model-value="mailbox.is_active" @update:model-value="toggleActive(mailbox)" />
                                             {{ mailbox.is_active ? 'Active' : 'Disabled' }}
                                         </span>
@@ -285,7 +286,8 @@ function confirmDelete() {
                         <TableCell class="hidden text-muted-foreground md:table-cell">{{ mailbox.name || '—' }}</TableCell>
                         <TableCell class="hidden text-muted-foreground md:table-cell">{{ mailbox.quota_mb }}</TableCell>
                         <TableCell class="hidden sm:table-cell">
-                            <Switch :model-value="mailbox.is_active" @update:model-value="toggleActive(mailbox)" />
+                            <Switch v-if="mailbox.can_manage" :model-value="mailbox.is_active" @update:model-value="toggleActive(mailbox)" />
+                            <span v-else class="text-sm text-muted-foreground">{{ mailbox.is_active ? 'Active' : 'Disabled' }}</span>
                         </TableCell>
                         <TableCell class="space-x-0.5 px-2 text-right sm:space-x-1 sm:px-4">
                             <Button
@@ -302,7 +304,7 @@ function confirmDelete() {
                             <Button variant="ghost" size="icon-sm" @click="startEdit(mailbox)">
                                 <PencilIcon class="size-4" />
                             </Button>
-                            <Button variant="ghost" size="icon-sm" @click="deleteTarget = mailbox">
+                            <Button v-if="mailbox.can_manage" variant="ghost" size="icon-sm" @click="deleteTarget = mailbox">
                                 <Trash2Icon class="size-4 text-destructive" />
                             </Button>
                         </TableCell>
@@ -341,14 +343,16 @@ function confirmDelete() {
                         <Label for="edit-name">Owner name</Label>
                         <Input id="edit-name" v-model="editForm.name" type="text" />
                     </div>
-                    <div class="space-y-1.5">
-                        <Label for="edit-quota">Quota, MB</Label>
-                        <Input id="edit-quota" v-model.number="editForm.quota_mb" type="number" min="1" />
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <Switch v-model="editForm.is_active" />
-                        <Label>Active</Label>
-                    </div>
+                    <template v-if="editing.can_manage">
+                        <div class="space-y-1.5">
+                            <Label for="edit-quota">Quota, MB</Label>
+                            <Input id="edit-quota" v-model.number="editForm.quota_mb" type="number" min="1" />
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <Switch v-model="editForm.is_active" />
+                            <Label>Active</Label>
+                        </div>
+                    </template>
                     <DialogFooter>
                         <Button type="submit" :disabled="editForm.processing">Save</Button>
                     </DialogFooter>

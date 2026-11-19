@@ -19,7 +19,7 @@ class MailboxTotalsController extends Controller
             return response()->json(['error' => 'Set DOVECOT_MASTER_PASSWORD to read message counts.'], 422);
         }
 
-        $rows = $reader->rows(Mailbox::where('is_active', true)->orderBy('email')->get(), $request->boolean('refresh'));
+        $rows = $reader->rows(Mailbox::visibleTo($request->user())->where('is_active', true)->orderBy('email')->get(), $request->boolean('refresh'));
 
         return response()->json([
             'mailboxes' => $rows->count(),

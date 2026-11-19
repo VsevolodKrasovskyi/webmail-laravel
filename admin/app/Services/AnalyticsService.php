@@ -6,6 +6,7 @@ use App\Models\Alias;
 use App\Models\Domain;
 use App\Models\Mailbox;
 use App\Models\ScheduledEmail;
+use App\Models\User;
 use App\Support\PageSize;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -25,9 +26,9 @@ class AnalyticsService
     /**
      * @return Collection<int, array<string, mixed>>
      */
-    private function domainQuery()
+    private function domainQuery(User $user)
     {
-        return Domain::query()
+        return Domain::visibleTo($user)
             ->withCount(['mailboxes', 'aliases'])
             ->withSum('mailboxes as quota_mb', 'quota_mb')
             ->orderBy('name');
@@ -53,17 +54,17 @@ class AnalyticsService
      *
      * @return Collection<int, array<string, mixed>>
      */
-    public function domainRows(): Collection
+    public function domainRows(User $user): Collection
     {
-        return $this->domainQuery()->get()->map(fn (Domain $d) => $this->domainRow($d));
+        return $this->domainQuery($user)->get()->map(fn (Domain $d) => $this->domainRow($d));
     }
 
     /**
      * One page of the domain report, paged in the database (query parameter `domains_page`, always 5 rows).
      */
-    public function domainsPage(): LengthAwarePaginator
+    public function domainsPage(User $user): LengthAwarePaginator
     {
-        return $this->domainQuery()
+        return $this->domainQuery($user)
             ->paginate(PageSize::DASHBOARD, ['*'], 'domains_page')
             ->through(fn (Domain $d) => $this->domainRow($d));
     }
@@ -73,7 +74,7 @@ class AnalyticsService
      *
      * @return array<int, array{month:string, domains:int, mailboxes:int, aliases:int}>
      */
-    public function growth(): array
+    public function growth(User $user): array
     {
         $start = now()->startOfMonth()->subMonths(self::MONTHS - 1);
         $buckets = [];
@@ -83,7 +84,7 @@ class AnalyticsService
         }
 
         foreach (['domains' => Domain::class, 'mailboxes' => Mailbox::class, 'aliases' => Alias::class] as $key => $model) {
-            $model::where('created_at', '>=', $start)->pluck('created_at')->each(function ($createdAt) use (&$buckets, $key) {
+            $model::visibleTo($user)->where('created_at', '>=', $start)->pluck('created_at')->each(function ($createdAt) use (&$buckets, $key) {
                 $month = Carbon::parse($createdAt)->format('Y-m');
                 if (isset($buckets[$month])) {
                     $buckets[$month][$key]++;
@@ -99,7 +100,7 @@ class AnalyticsService
      *
      * @return array<int, array{day:string, sent:int, failed:int}>
      */
-    public function scheduledDaily(): array
+    public function scheduledDaily(User $user): array
     {
         $start = now()->startOfDay()->subDays(self::SCHEDULED_DAYS - 1);
         $days = [];
@@ -108,7 +109,7 @@ class AnalyticsService
             $days[$start->copy()->addDays($i)->format('Y-m-d')] = ['sent' => 0, 'failed' => 0];
         }
 
-        ScheduledEmail::where('send_at', '>=', $start)
+        ScheduledEmail::visibleTo($user)->where('send_at', '>=', $start)
             ->whereIn('status', [ScheduledEmail::SENT, ScheduledEmail::FAILED])
             ->get(['send_at', 'status'])
             ->each(function ($m) use (&$days) {

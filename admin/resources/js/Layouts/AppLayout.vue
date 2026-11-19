@@ -1,9 +1,11 @@
 <script setup>
-import { watch } from 'vue';
+import { computed, watch } from 'vue';
 import DashboardController from '@/actions/App/Http/Controllers/DashboardController';
 import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import MailboxController from '@/actions/App/Http/Controllers/MailboxController';
 import AliasController from '@/actions/App/Http/Controllers/AliasController';
+import SettingsController from '@/actions/App/Http/Controllers/SettingsController';
+import UserController from '@/actions/App/Http/Controllers/UserController';
 import WebmailController from '@/actions/App/Http/Controllers/WebmailController';
 import AuthenticatedSessionController from '@/actions/App/Http/Controllers/Auth/AuthenticatedSessionController';
 import { Link, usePage, router } from '@inertiajs/vue3';
@@ -13,6 +15,8 @@ import {
     GlobeIcon,
     MailIcon,
     ArrowRightLeftIcon,
+    UsersIcon,
+    SettingsIcon,
     LogOutIcon,
 } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
@@ -25,13 +29,19 @@ import Sonner from '@/components/ui/sonner/Sonner.vue';
 
 const page = usePage();
 
-const nav = [
-    { href: DashboardController.url(), label: 'Dashboard', icon: LayoutDashboardIcon },
-    { href: DomainController.index.url(), label: 'Domains', icon: GlobeIcon },
-    // Webmail is opened from the Mailboxes list, so it keeps this item highlighted.
-    { href: MailboxController.index.url(), also: [WebmailController.index.url()], label: 'Mailboxes', icon: MailIcon },
-    { href: AliasController.index.url(), label: 'Aliases', icon: ArrowRightLeftIcon },
-];
+// Domains and Aliases are for those who manage a domain, Users for administrators.
+const nav = computed(() => {
+    const user = page.props.auth.user;
+
+    return [
+        { href: DashboardController.url(), label: 'Dashboard', icon: LayoutDashboardIcon },
+        ...(user?.manages_domains ? [{ href: DomainController.index.url(), label: 'Domains', icon: GlobeIcon }] : []),
+        // Webmail is opened from the Mailboxes list, so it keeps this item highlighted.
+        { href: MailboxController.index.url(), also: [WebmailController.index.url()], label: 'Mailboxes', icon: MailIcon },
+        ...(user?.manages_domains ? [{ href: AliasController.index.url(), label: 'Aliases', icon: ArrowRightLeftIcon }] : []),
+        ...(user?.is_admin ? [{ href: UserController.index.url(), label: 'Users', icon: UsersIcon }] : []),
+    ];
+});
 
 watch(
     () => page.props.flash?.success,
@@ -116,6 +126,10 @@ function initials(email) {
                             <span class="block truncate text-xs text-muted-foreground">{{ page.props.auth.user?.email }}</span>
                         </DropdownMenuLabel>
                         <DropdownMenuSeparator />
+                        <DropdownMenuItem class="gap-2 py-2.5" @click="router.visit(SettingsController.show.url())">
+                            <SettingsIcon class="size-4" />
+                            Settings
+                        </DropdownMenuItem>
                         <DropdownMenuItem class="gap-2 py-2.5" @click="logout">
                             <LogOutIcon class="size-4" />
                             Log out

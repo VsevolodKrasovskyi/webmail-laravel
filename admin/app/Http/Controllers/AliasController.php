@@ -6,6 +6,7 @@ use App\Models\Alias;
 use App\Models\Domain;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -17,7 +18,7 @@ class AliasController extends Controller
     {
         $filters = $request->only(['search', 'status', 'sort', 'direction']);
 
-        $query = Alias::with('domain:id,name');
+        $query = Alias::visibleTo($request->user())->with('domain:id,name');
 
         if (filled($filters['search'] ?? null)) {
             $term = '%'.$filters['search'].'%';
@@ -50,11 +51,15 @@ class AliasController extends Controller
 
         $domainName = Str::lower(Str::afterLast($data['source'], '@'));
 
-        if (! Domain::where('name', $domainName)->exists()) {
+        $domain = Domain::where('name', $domainName)->first();
+
+        if (! $domain) {
             throw ValidationException::withMessages([
                 'source' => "Domain {$domainName} was not found. Add the domain first.",
             ]);
         }
+
+        abort_unless($request->user()->canManageDomain($domain->id), 403);
 
         if (Alias::where('source', Str::lower($data['source']))->where('destination', Str::lower($data['destination']))->exists()) {
             throw ValidationException::withMessages([
@@ -69,6 +74,8 @@ class AliasController extends Controller
 
     public function update(Request $request, Alias $alias): RedirectResponse
     {
+        Gate::authorize('update', $alias);
+
         $data = $request->validate([
             'destination' => ['required', 'email', 'max:255'],
             'is_active' => ['required', 'boolean'],
@@ -81,6 +88,8 @@ class AliasController extends Controller
 
     public function destroy(Alias $alias): RedirectResponse
     {
+        Gate::authorize('delete', $alias);
+
         $alias->delete();
 
         return back()->with('success', 'Alias deleted.');

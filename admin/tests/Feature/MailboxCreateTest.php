@@ -4,17 +4,17 @@ namespace Tests\Feature;
 
 use App\Models\Domain;
 use App\Models\Mailbox;
-use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 class MailboxCreateTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function create(string $email): \Illuminate\Testing\TestResponse
+    private function create(string $email): TestResponse
     {
-        return $this->actingAs(User::factory()->create())->post('/mailboxes', [
+        return $this->actingAsAdmin()->post('/mailboxes', [
             'email' => $email, 'password' => 'long-enough-1', 'quota_mb' => 100,
         ]);
     }
@@ -61,7 +61,7 @@ class MailboxCreateTest extends TestCase
         Domain::create(['name' => 'a.test']);
         Domain::create(['name' => 'off.test', 'is_active' => false]);
 
-        $this->actingAs(User::factory()->create())->get('/mailboxes')
+        $this->actingAsAdmin()->get('/mailboxes')
             ->assertInertia(fn ($page) => $page->where('domains', ['a.test', 'b.test']));
     }
 }

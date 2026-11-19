@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -29,6 +30,18 @@ class Mailbox extends Model
             'is_active' => 'boolean',
             'quota_mb' => 'integer',
         ];
+    }
+
+    /** Administrators see every mailbox, other users those of their domains and the ones assigned to them. */
+    public function scopeVisibleTo(Builder $query, User $user): Builder
+    {
+        if ($user->isAdmin()) {
+            return $query;
+        }
+
+        return $query->where(fn (Builder $q) => $q
+            ->whereIn('mailboxes.domain_id', $user->managedDomainIds())
+            ->orWhereIn('mailboxes.id', $user->assignedMailboxIds()));
     }
 
     public function domain(): BelongsTo

@@ -3,10 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Domain;
-use App\Support\PageSize;
 use App\Models\Mailbox;
+use App\Support\PageSize;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -18,7 +19,8 @@ class MailboxController extends Controller
     {
         $filters = $request->only(['search', 'status', 'domain', 'sort', 'direction']);
 
-        $query = Mailbox::with('domain:id,name');
+        $user = $request->user();
+        $query = Mailbox::visibleTo($user)->with('domain:id,name');
 
         if (filled($filters['search'] ?? null)) {
             $term = '%'.$filters['search'].'%';
@@ -44,8 +46,15 @@ class MailboxController extends Controller
         $perPage = PageSize::list($request->query('per_page'));
 
         return Inertia::render('Mailboxes/Index', [
-            'mailboxes' => $query->paginate($perPage)->withQueryString(),
-            'domains' => Domain::where('is_active', true)->orderBy('name')->pluck('name'),
+            // `can_manage`: quota, active flag and delete need the whole domain, an assigned mailbox only allows name and password.
+            'mailboxes' => $query->paginate($perPage)->withQueryString()
+                ->through(fn (Mailbox $m) => tap($m, fn () => $m->setAttribute('can_manage', $user->canManageMailbox($m)))),
+            // For the filter: the active domains, for a non-admin those of their mailboxes.
+            'domains' => Domain::query()
+                ->when(! $user->isAdmin(), fn ($q) => $q->whereIn('id', Mailbox::visibleTo($user)->select('domain_id')))
+                ->where('is_active', true)->orderBy('name')->pluck('name'),
+            // Active domains the user may create mailboxes on.
+            'createDomains' => Domain::visibleTo($user)->where('is_active', true)->orderBy('name')->pluck('name'),
             'webmailImpersonationEnabled' => filled(config('mail_server.dovecot_master_password')),
             'filters' => array_merge(['search' => '', 'status' => 'all', 'domain' => 'all', 'sort' => $sort, 'direction' => $direction], $filters, ['per_page' => $perPage]),
         ]);
@@ -72,11 +81,15 @@ class MailboxController extends Controller
 
         $domainName = Str::lower(Str::afterLast($data['email'], '@'));
 
-        if (! Domain::where('name', $domainName)->where('is_active', true)->exists()) {
+        $domain = Domain::where('name', $domainName)->where('is_active', true)->first();
+
+        if (! $domain) {
             throw ValidationException::withMessages([
                 'email' => "Domain {$domainName} was not found or is disabled. Add an active domain first.",
             ]);
         }
+
+        abort_unless($request->user()->canManageDomain($domain->id), 403);
 
         Mailbox::create($data);
 
@@ -85,12 +98,22 @@ class MailboxController extends Controller
 
     public function update(Request $request, Mailbox $mailbox): RedirectResponse
     {
-        $data = $request->validate([
+        Gate::authorize('update', $mailbox);
+
+        $rules = [
             'password' => ['nullable', 'string', 'min:8'],
             'name' => ['nullable', 'string', 'max:255'],
-            'quota_mb' => ['required', 'integer', 'min:1'],
-            'is_active' => ['required', 'boolean'],
-        ]);
+        ];
+
+        // Quota and the active flag belong to whoever manages the whole domain.
+        if ($request->user()->can('manage', $mailbox)) {
+            $rules += [
+                'quota_mb' => ['required', 'integer', 'min:1'],
+                'is_active' => ['required', 'boolean'],
+            ];
+        }
+
+        $data = $request->validate($rules);
 
         if (blank($data['password'] ?? null)) {
             unset($data['password']);
@@ -103,6 +126,8 @@ class MailboxController extends Controller
 
     public function destroy(Mailbox $mailbox): RedirectResponse
     {
+        Gate::authorize('delete', $mailbox);
+
         $mailbox->delete();
 
         return back()->with('success', 'Mailbox deleted.');

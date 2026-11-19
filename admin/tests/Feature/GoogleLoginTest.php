@@ -15,7 +15,7 @@ class GoogleLoginTest extends TestCase
 
     private function googleReturns(string $email, bool $verified = true): void
     {
-        $user = (new SocialiteUser())->map(['id' => 'g-1', 'name' => 'Ada', 'email' => $email, 'avatar' => 'https://lh3.googleusercontent.com/a/photo=s96']);
+        $user = (new SocialiteUser)->map(['id' => 'g-1', 'name' => 'Ada', 'email' => $email, 'avatar' => 'https://lh3.googleusercontent.com/a/photo=s96']);
         $user->user = ['email_verified' => $verified];
 
         $provider = Mockery::mock();
@@ -33,9 +33,7 @@ class GoogleLoginTest extends TestCase
         $this->assertAuthenticated();
         $this->assertDatabaseHas('users', ['email' => 'boss@example.com', 'google_id' => 'g-1', 'avatar' => 'https://lh3.googleusercontent.com/a/photo=s96']);
 
-        // The session keeps working on later requests with no password column at all.
-        $this->get('/dashboard')->assertOk();
-        $this->get('/domains')->assertOk();
+        $this->assertNotNull(User::where('email', 'boss@example.com')->first()->email_verified_at);
     }
 
     public function test_an_unlisted_account_is_rejected(): void
@@ -59,8 +57,35 @@ class GoogleLoginTest extends TestCase
         $this->assertGuest();
     }
 
-    public function test_there_is_no_password_login(): void
+    public function test_an_existing_user_can_sign_in_with_google_and_gets_verified(): void
     {
-        $this->post('/login', ['email' => 'a@b.com', 'password' => 'whatever-123'])->assertStatus(405);
+        config(['auth.admin_emails' => ['boss@example.com']]);
+        $user = User::factory()->unverified()->create(['email' => 'staff@example.com']);
+        $this->googleReturns('staff@example.com');
+
+        $this->get('/auth/google/callback')->assertRedirect('/dashboard');
+
+        $this->assertAuthenticatedAs($user);
+        $this->assertNotNull($user->fresh()->email_verified_at);
+        $this->assertSame('g-1', $user->fresh()->google_id);
+    }
+
+    public function test_google_sign_in_needs_no_code_until_two_factor_is_turned_on(): void
+    {
+        config(['auth.admin_emails' => ['boss@example.com']]);
+        $this->googleReturns('boss@example.com');
+
+        $this->get('/auth/google/callback');
+        $this->get('/dashboard')->assertOk();
+    }
+
+    public function test_google_sign_in_asks_for_the_code_once_it_is_on(): void
+    {
+        config(['auth.admin_emails' => ['boss@example.com']]);
+        User::factory()->withTwoFactor()->create(['email' => 'boss@example.com']);
+        $this->googleReturns('boss@example.com');
+
+        $this->get('/auth/google/callback');
+        $this->get('/dashboard')->assertRedirect('/two-factor/challenge');
     }
 }

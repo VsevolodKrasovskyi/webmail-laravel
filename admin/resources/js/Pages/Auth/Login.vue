@@ -1,35 +1,58 @@
 <script setup>
-import { Head, usePage } from '@inertiajs/vue3';
-import { MailIcon } from '@lucide/vue';
-import { Card, CardContent } from '@/components/ui/card';
+import { Head, Link, useForm } from '@inertiajs/vue3';
+import AuthenticatedSessionController from '@/actions/App/Http/Controllers/Auth/AuthenticatedSessionController';
+import PasswordResetController from '@/actions/App/Http/Controllers/Auth/PasswordResetController';
+import AuthCard from '@/components/AuthCard.vue';
 import GoogleButton from '@/components/GoogleButton.vue';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 defineProps({
     googleConfigured: Boolean,
     adminConfigured: Boolean,
 });
 
-const page = usePage();
+const form = useForm({ email: '', password: '', remember: false });
+
+function submit() {
+    form.submit(AuthenticatedSessionController.store(), {
+        onFinish: () => form.reset('password'),
+    });
+}
 </script>
 
 <template>
     <Head title="Sign in" />
-    <div class="flex min-h-screen items-center justify-center bg-background px-4">
-        <Card class="mx-auto w-full max-w-sm">
-            <div class="flex flex-col items-center px-6 pt-6 text-center">
-                <div class="mb-3 flex size-12 items-center justify-center rounded-2xl bg-blue-600 text-white">
-                    <MailIcon class="size-6" />
-                </div>
-                <h1 class="text-lg font-semibold leading-none">Mail Admin</h1>
-                <p class="mb-6 mt-2 text-sm text-muted-foreground">Sign in with your Google account</p>
+    <AuthCard subtitle="Sign in to continue">
+        <form class="space-y-4" @submit.prevent="submit">
+            <div class="space-y-1.5">
+                <Label for="email">Email</Label>
+                <Input id="email" v-model="form.email" type="email" autocomplete="username" autofocus required />
+                <p v-if="form.errors.email" class="text-sm text-destructive">{{ form.errors.email }}</p>
             </div>
-            <CardContent>
-                <p v-if="page.props.flash?.error" class="mb-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                    {{ page.props.flash.error }}
-                </p>
+            <div class="space-y-1.5">
+                <div class="flex items-center justify-between">
+                    <Label for="password">Password</Label>
+                    <Link :href="PasswordResetController.request.url()" class="text-xs text-muted-foreground underline underline-offset-4">
+                        Forgot password?
+                    </Link>
+                </div>
+                <Input id="password" v-model="form.password" type="password" autocomplete="current-password" required />
+                <p v-if="form.errors.password" class="text-sm text-destructive">{{ form.errors.password }}</p>
+            </div>
+            <label class="flex items-center gap-2 text-sm">
+                <input v-model="form.remember" type="checkbox" class="size-4 rounded border accent-primary" />
+                Remember me
+            </label>
+            <Button type="submit" class="w-full" :disabled="form.processing">Sign in</Button>
+        </form>
 
-                <GoogleButton v-if="googleConfigured && adminConfigured" />
-            </CardContent>
-        </Card>
-    </div>
+        <template v-if="googleConfigured && adminConfigured">
+            <div class="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+                <span class="h-px flex-1 bg-border" />or<span class="h-px flex-1 bg-border" />
+            </div>
+            <GoogleButton />
+        </template>
+    </AuthCard>
 </template>

@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\ScheduledEmail;
-use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -21,7 +20,7 @@ class ScheduleTimeTest extends TestCase
 
         $session = ['webmail_credentials' => encrypt(['email' => 'a@example.com', 'password' => 'x'])];
         // 2030-06-01 15:00 in Sofia (UTC+3 in summer) is 12:00 UTC, which is what a browser sends.
-        $this->actingAs(User::factory()->create())->withSession($session)->postJson('/webmail/schedule', [
+        $this->actingAsAdmin()->withSession($session)->postJson('/webmail/schedule', [
             'to' => 'b@example.com', 'subject' => 'Hi', 'body' => '<p>x</p>', 'send_at' => '2030-06-01T12:00:00.000Z',
         ])->assertOk();
 
