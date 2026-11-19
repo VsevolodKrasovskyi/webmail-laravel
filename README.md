@@ -89,7 +89,21 @@ The admin panel runs outside Docker and reaches Postgres on `127.0.0.1:5432` and
 - A recent Node.js LTS (only to build the frontend)
 - nginx (or another web server) with php-fpm and certbot on the host
 
-## First run
+## Quick install (Debian or Ubuntu)
+
+On a fresh server with a public IP and a DNS A record for the mail host name, clone the repository somewhere the web server can read (not `/root` or `/home`) and run the installer:
+
+```bash
+git clone <repository url> /opt/mailserver
+cd /opt/mailserver
+sudo ./install.sh --host mail.example.com --domain example.com --email you@example.com
+```
+
+It installs Docker, PHP 8.4, Composer, Node.js, nginx and certbot, creates both `.env` files with random secrets, gets the certificate, starts the mail stack, builds the panel and adds the cron entry. Without options it asks for the values. It can be run again: existing `.env` files and secrets are kept, and it rebuilds and migrates, so `git pull && sudo ./install.sh ...` also updates a running install. At the end it prints the next steps (create the administrator, firewall, DNS records).
+
+The installer uses the official installers of Docker (get.docker.com), Node.js (NodeSource) and Composer, and the PHP packages of ondrej/sury. If you prefer to control that, follow the manual steps below.
+
+## First run (manual)
 
 ### 1. Mail stack
 
@@ -122,7 +136,7 @@ php artisan migrate --force
 npm ci && npm run build
 ```
 
-Point nginx at `admin/public` with php-fpm, create the Google OAuth client (see "Sign in with Google" below), then open the site and sign in. The admin user is created automatically on the first sign-in.
+Point nginx at `admin/public` with php-fpm and open the site. With no users yet it offers to create the administrator (see "Sign-in, two-factor authentication and users" below). Google sign-in is optional.
 
 ### 3. Cron for scheduled mail
 
