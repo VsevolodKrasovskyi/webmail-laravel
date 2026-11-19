@@ -8,6 +8,8 @@ use App\Models\Mailbox;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -56,6 +58,34 @@ class UserController extends Controller
         $user->mailboxes()->sync($data['mailbox_ids'] ?? []);
 
         return back()->with('success', 'Access updated.');
+    }
+
+    /**
+     * Promote or demote. Deliberately hard to do by accident: the administrator has to type the
+     * address of the user, and cannot change their own role (so the last administrator stays one).
+     */
+    public function setAdmin(Request $request, User $user): RedirectResponse
+    {
+        $data = $request->validate([
+            'is_admin' => ['required', 'boolean'],
+            'confirm_email' => ['required', 'string'],
+        ]);
+
+        if ($user->is($request->user())) {
+            return back()->with('error', 'You cannot change your own role.');
+        }
+
+        if (Str::lower(trim($data['confirm_email'])) !== Str::lower($user->email)) {
+            throw ValidationException::withMessages(['confirm_email' => 'Type the exact e-mail address of the user.']);
+        }
+
+        if ($data['is_admin'] && ! $user->hasVerifiedEmail()) {
+            return back()->with('error', 'The e-mail address of this user is not verified yet.');
+        }
+
+        $user->forceFill(['is_admin' => $data['is_admin']])->save();
+
+        return back()->with('success', $data['is_admin'] ? "{$user->email} is an administrator now." : "{$user->email} is no longer an administrator.");
     }
 
     /** Lost device and recovery codes: the user sets two-factor authentication up again at the next sign-in. */

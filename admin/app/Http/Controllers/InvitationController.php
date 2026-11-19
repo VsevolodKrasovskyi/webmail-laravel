@@ -30,10 +30,6 @@ class InvitationController extends Controller
             'mailbox_ids.required_without' => 'Pick a domain or a mailbox.',
         ]);
 
-        if (in_array($data['email'], config('auth.admin_emails'), true)) {
-            throw ValidationException::withMessages(['email' => 'This address is an administrator (ADMIN_EMAIL), it needs no invitation.']);
-        }
-
         if (User::where('email', $data['email'])->exists()) {
             throw ValidationException::withMessages(['email' => 'This user already exists. Change their access in the list.']);
         }

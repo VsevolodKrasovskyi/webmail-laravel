@@ -14,7 +14,7 @@ Self-hosted mail server with a web admin panel and webmail.
 - Admin shortcut that opens any mailbox's webmail without its password (Dovecot master user).
 - Dashboard with live message counts per mailbox and an unread notification, growth charts, setup health, scheduled sending stats and a domain report.
 - Sign-in with a password or with Google, optional two-factor authentication (authenticator app and recovery codes), e-mail verification and password reset.
-- Users join by invitation. Addresses in `ADMIN_EMAIL` are administrators with every domain and mailbox, an invited user gets whole domains or single mailboxes.
+- The first user to register becomes the administrator (every domain and mailbox, user management). Other users join by invitation and get whole domains or single mailboxes. An administrator can make other users administrators.
 - Responsive layout for phones.
 
 ## Architecture
@@ -113,7 +113,7 @@ cd admin
 cp .env.example .env
 # Set APP_URL, APP_DOMAIN, APP_ENV=production, APP_DEBUG=false, APP_TIMEZONE,
 # the same DB_* and DOVECOT_MASTER_PASSWORD as the root .env,
-# ADMIN_EMAIL (the Google address(es) allowed to sign in) and the GOOGLE_* values.
+# and the GOOGLE_* values if you want Google sign-in.
 # Set SESSION_SECURE_COOKIE=true when served over HTTPS.
 
 composer install --no-dev --optimize-autoloader
@@ -171,8 +171,7 @@ Only variables that differ from the framework defaults are in `admin/.env.exampl
 | `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | Same as the root `.env`. |
 | `APP_DOMAIN` | Same as the root `.env`. Used as the MX target when syncing DNS. |
 | `DOVECOT_MASTER_PASSWORD` | Same as the root `.env`. |
-| `ADMIN_EMAIL` | Administrator addresses, comma-separated (`a@example.com,b@example.com`). They see every domain and mailbox and manage users. The user is created on the first Google sign-in. An address removed from the list loses the admin rights. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client. Without it nobody can create the first administrator, because a password can only be set after the account exists. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional. Google OAuth client, enables "Sign in with Google". Without it people sign in with e-mail and password. |
 | `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` | System e-mail (invitations, verification, password reset) goes through this stack's own Postfix. Use `MAIL_MAILER=postfix` and a `MAIL_FROM_ADDRESS` that is an existing mailbox, for example `noreply@example.com`. The panel signs in as that mailbox with the Dovecot master user, no mailbox password is stored. |
 | `SESSION_SECURE_COOKIE` | `true` when the panel is served over HTTPS. With `false` on HTTPS or `true` on plain HTTP the login loops. |
 | `CLOUDFLARE_API_TOKEN` | Optional. Enables "Sync DNS" on the Domains page. |
@@ -195,7 +194,11 @@ Everything else (sessions, cache and queue in the database, locale) uses Laravel
 
 ## Sign-in, two-factor authentication and users
 
-**First administrator.** Set `ADMIN_EMAIL`, `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, then sign in with Google. The account is created on the first sign-in with a verified Google address from `ADMIN_EMAIL`. To use a password as well, press **Forgot password?** on the login page. The link goes to the same address and sets the first password.
+**First administrator.** On a fresh install there are no users, so opening the panel shows **Create the administrator**: name, e-mail and password, or **Continue with Google**. That first user becomes the administrator and registration closes for good, after that people join only by invitation. Whoever opens the panel first gets full control, so register right after the first start, before the panel is reachable by others. The first administrator's e-mail counts as verified without a link, because no mail can be sent yet.
+
+**Making other administrators.** On **Users** an administrator presses the shield icon next to a user and types the user's address to confirm. You cannot change your own role, so there is always at least one administrator. An administrator sees and changes every domain, mailbox and alias, opens any mailbox in webmail, and invites, deletes and promotes users, so give the role only to people you fully trust.
+
+**Google sign-in (optional).**
 
 1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials) create an **OAuth client ID** of type **Web application**.
 2. Add this **Authorized redirect URI**. It is always your `APP_URL` plus `/auth/google/callback`, scheme included, for example:
@@ -204,7 +207,6 @@ Everything else (sessions, cache and queue in the database, locale) uses Laravel
 
    ```env
    APP_URL=https://<your panel host>
-   ADMIN_EMAIL=you@example.com
    GOOGLE_CLIENT_ID=...
    GOOGLE_CLIENT_SECRET=...
    MAIL_MAILER=postfix
@@ -223,13 +225,19 @@ Everything else (sessions, cache and queue in the database, locale) uses Laravel
 
 The invited user gets a link valid for 7 days, sets a name and a password, then signs in. The link also confirms the e-mail address. An invited address can sign in with Google instead, if it is the same address. Domain and mailbox access can be changed later, and **Resend** issues a new link.
 
-**Locked out.** If a user with two-factor authentication loses the phone and the recovery codes, an administrator resets it on the Users page. If that is the only administrator, reset the second factor from a console:
+**Locked out.** If a user with two-factor authentication loses the phone and the recovery codes, an administrator resets it on the Users page. If that is the only administrator, reset it from a console:
 
 ```bash
 php artisan tinker --execute="App\\Models\\User::where('email', 'you@example.com')->update(['two_factor_secret' => null, 'two_factor_recovery_codes' => null, 'two_factor_confirmed_at' => null]);"
 ```
 
-Anyone who controls an address in `ADMIN_EMAIL` controls the panel, so protect those mailboxes and Google accounts.
+To make a user an administrator from the console, for example when the last administrator lost access:
+
+```bash
+php artisan tinker --execute="App\\Models\\User::where('email', 'you@example.com')->update(['is_admin' => true]);"
+```
+
+Every administrator controls the panel, so protect their passwords, Google accounts and mailboxes.
 
 ## Connect a mail client
 
@@ -341,7 +349,7 @@ Dates in the UI use `APP_TIMEZONE` from `admin/.env` (default `UTC`). The time p
 - Postgres is published on loopback only. Redis is not published at all.
 - Received HTML is sanitized in the browser with DOMPurify before it is shown. Scripts, `style` blocks, iframes, forms, SVG and MathML, event handlers and `javascript:` or `data:` links are removed. Inline styles stay (without `position` and `z-index`), links open in a new tab with `noopener noreferrer`, and the message is clipped to its own box. Remote images are still loaded, so a sender can see that a message was opened. Attachments are served as downloads with `nosniff`.
 - Webmail keeps the mailbox password only in an encrypted session value. Scheduled sending does not store passwords, it authenticates through the master user.
-- Sign-in is Google-only and limited to the verified addresses in `ADMIN_EMAIL`, so the panel has no stored passwords to leak or guess.
+- Sign-in is by password or Google. Passwords are hashed, sign-in and reset are rate limited, and two-factor authentication is available. Registration is open only until the first user exists, after that every account is created by an administrator's invitation.
 - The mail ports are open to the internet by design, so keep the host patched and consider fail2ban for Dovecot and Postfix.
 
 ## Notes and limitations

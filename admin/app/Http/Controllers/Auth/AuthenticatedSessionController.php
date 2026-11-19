@@ -19,11 +19,15 @@ class AuthenticatedSessionController extends Controller
     /** A valid bcrypt hash of nothing useful, checked when there is no real one to compare against. */
     private const DUMMY_HASH = '$2y$12$j2dpFehcFKQG29pxMKH64uRDgJyTXS5vv7DjxEgktOd0eempprtwG';
 
-    public function create(): Response
+    public function create(): Response|RedirectResponse
     {
+        // A fresh install has no users: the first one registers and becomes the administrator.
+        if (! User::exists()) {
+            return redirect()->route('register');
+        }
+
         return Inertia::render('Auth/Login', [
             'googleConfigured' => filled(config('services.google.client_id')) && filled(config('services.google.client_secret')),
-            'adminConfigured' => ! empty(config('auth.admin_emails')),
         ]);
     }
 

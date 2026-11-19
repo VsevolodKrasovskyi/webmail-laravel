@@ -10,7 +10,6 @@ import { Label } from '@/components/ui/label';
 
 defineProps({
     googleConfigured: Boolean,
-    adminConfigured: Boolean,
 });
 
 const form = useForm({ email: '', password: '', remember: false });
@@ -48,7 +47,7 @@ function submit() {
             <Button type="submit" class="w-full" :disabled="form.processing">Sign in</Button>
         </form>
 
-        <template v-if="googleConfigured && adminConfigured">
+        <template v-if="googleConfigured">
             <div class="my-4 flex items-center gap-3 text-xs text-muted-foreground">
                 <span class="h-px flex-1 bg-border" />or<span class="h-px flex-1 bg-border" />
             </div>

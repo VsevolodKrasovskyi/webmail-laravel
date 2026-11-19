@@ -203,13 +203,12 @@ class AccessScopingTest extends TestCase
             ->assertInertia(fn ($p) => $p->where('auth.user.is_admin', false)->where('auth.user.manages_domains', true));
     }
 
-    public function test_removing_an_address_from_admin_email_removes_the_admin_rights(): void
+    public function test_a_demoted_admin_loses_the_admin_rights(): void
     {
-        $admin = User::factory()->withTwoFactor()->create();
-        config(['auth.admin_emails' => [strtolower($admin->email)]]);
+        $admin = User::factory()->admin()->withTwoFactor()->create();
         $this->assertTrue($admin->isAdmin());
 
-        config(['auth.admin_emails' => []]);
+        $admin->forceFill(['is_admin' => false])->save();
 
         $this->assertFalse($admin->fresh()->isAdmin());
         $this->actingAsFullyAuthenticated($admin->fresh())->get('/domains')->assertInertia(fn ($p) => $p->has('domains.data', 0));

@@ -28,6 +28,7 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         return [
             'email_verified_at' => 'datetime',
+            'is_admin' => 'boolean',
             'password' => 'hashed',
             'two_factor_secret' => 'encrypted',
             'two_factor_recovery_codes' => 'encrypted:array',
@@ -35,10 +36,10 @@ class User extends Authenticatable implements MustVerifyEmail
         ];
     }
 
-    /** Addresses listed in ADMIN_EMAIL are administrators: every domain and mailbox, and the user list. */
+    /** Administrators see every domain and mailbox, and manage users. The first user is one, others are promoted by an administrator. */
     public function isAdmin(): bool
     {
-        return in_array(strtolower($this->email), config('auth.admin_emails'), true);
+        return (bool) $this->is_admin;
     }
 
     public function hasTwoFactor(): bool

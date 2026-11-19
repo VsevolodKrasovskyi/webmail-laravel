@@ -38,9 +38,10 @@ class GoogleAuthController extends Controller
         $user = User::where('email', $email)->first();
 
         if (! $user) {
-            // Not in the panel yet: an administrator from ADMIN_EMAIL, or an invited address.
-            if (in_array($email, config('auth.admin_emails'), true)) {
+            // Not in the panel yet: the very first user becomes the administrator, later ones need an invitation.
+            if (! User::exists()) {
                 $user = User::create(['email' => $email, 'name' => $googleUser->getName() ?: 'Admin']);
+                $user->forceFill(['is_admin' => true])->save();
             } elseif ($invitation = Invitation::pendingForEmail($email)) {
                 $user = $invitation->accept($googleUser->getName() ?: $email);
             } else {

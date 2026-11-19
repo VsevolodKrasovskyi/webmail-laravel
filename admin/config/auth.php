@@ -9,21 +9,6 @@ return [
     | only if its verified email is in this comma-separated list. The matching
     | user row is created on first sign-in, no seeding or passwords involved.
     */
-    'admin_emails' => array_values(array_filter(array_map(
-        fn ($email) => strtolower(trim($email)),
-        explode(',', (string) env('ADMIN_EMAIL', '')),
-    ))),
-
-    /*
-    |--------------------------------------------------------------------------
-    | Authentication Defaults
-    |--------------------------------------------------------------------------
-    |
-    | This option defines the default authentication "guard" for your
-    | application. Sign-in is Google-only, so there is no password broker.
-    |
-    */
-
     'defaults' => [
         'guard' => env('AUTH_GUARD', 'web'),
         'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),

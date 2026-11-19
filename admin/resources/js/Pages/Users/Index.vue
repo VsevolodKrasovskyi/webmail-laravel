@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import UserController from '@/actions/App/Http/Controllers/UserController';
 import InvitationController from '@/actions/App/Http/Controllers/InvitationController';
-import { PlusIcon, Trash2Icon, PencilIcon, SendIcon, ShieldOffIcon, XIcon } from '@lucide/vue';
+import { PlusIcon, Trash2Icon, PencilIcon, SendIcon, ShieldOffIcon, ShieldCheckIcon, XIcon } from '@lucide/vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import AccessPicker from '@/components/AccessPicker.vue';
 import { Badge } from '@/components/ui/badge';
@@ -82,6 +82,24 @@ function saveAccess() {
     editForm.submit(UserController.update(editing.value.id), {
         preserveScroll: true,
         onSuccess: () => (editing.value = null),
+    });
+}
+
+// Promote or demote. The address of the user has to be typed, so it cannot happen by accident.
+const adminTarget = ref(null);
+const adminForm = useForm({ is_admin: true, confirm_email: '' });
+
+function askAdmin(user) {
+    adminTarget.value = user;
+    adminForm.is_admin = ! user.is_admin;
+    adminForm.confirm_email = '';
+    adminForm.clearErrors();
+}
+
+function saveAdmin() {
+    adminForm.submit(UserController.setAdmin(adminTarget.value.id), {
+        preserveScroll: true,
+        onSuccess: () => (adminTarget.value = null),
     });
 }
 
@@ -176,6 +194,9 @@ function confirmDelete() {
                             <Button v-if="! user.is_admin" variant="ghost" size="icon-sm" title="Change access" @click="edit(user)">
                                 <PencilIcon class="size-4" />
                             </Button>
+                            <Button v-if="user.id !== me.id" variant="ghost" size="icon-sm" :title="user.is_admin ? 'Remove administrator rights' : 'Make administrator'" @click="askAdmin(user)">
+                                <ShieldCheckIcon class="size-4" :class="user.is_admin ? 'text-primary' : ''" />
+                            </Button>
                             <Button variant="ghost" size="icon-sm" title="Reset two-factor authentication" :disabled="! user.two_factor" @click="resetTarget = user">
                                 <ShieldOffIcon class="size-4" />
                             </Button>
@@ -229,6 +250,33 @@ function confirmDelete() {
                     />
                     <DialogFooter>
                         <Button type="submit" :disabled="editForm.processing">Save</Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+
+        <Dialog :open="adminTarget !== null" @update:open="(v) => !v && (adminTarget = null)">
+            <DialogContent v-if="adminTarget">
+                <DialogHeader>
+                    <DialogTitle>{{ adminForm.is_admin ? 'Make' : 'Remove' }} {{ adminTarget.email }} {{ adminForm.is_admin ? 'an administrator' : 'as administrator' }}?</DialogTitle>
+                    <DialogDescription v-if="adminForm.is_admin">
+                        An administrator sees and changes every domain, mailbox and alias, opens any mailbox in webmail,
+                        invites and deletes users and can make other administrators. Do it only for someone you fully trust.
+                    </DialogDescription>
+                    <DialogDescription v-else>
+                        The user keeps the account and only the access given in the list (domains and mailboxes), if any.
+                    </DialogDescription>
+                </DialogHeader>
+                <form class="space-y-4" @submit.prevent="saveAdmin">
+                    <div class="space-y-1.5">
+                        <Label for="confirm-email">Type <span class="font-mono">{{ adminTarget.email }}</span> to confirm</Label>
+                        <Input id="confirm-email" v-model="adminForm.confirm_email" autocomplete="off" autofocus required />
+                        <p v-if="adminForm.errors.confirm_email" class="text-sm text-destructive">{{ adminForm.errors.confirm_email }}</p>
+                    </div>
+                    <DialogFooter>
+                        <Button type="submit" :variant="adminForm.is_admin ? 'default' : 'destructive'" :disabled="adminForm.processing">
+                            {{ adminForm.is_admin ? 'Make administrator' : 'Remove rights' }}
+                        </Button>
                     </DialogFooter>
                 </form>
             </DialogContent>

@@ -21,8 +21,13 @@ const visibleMailboxes = computed(() => {
     return term ? props.mailboxes.filter((m) => m.email.toLowerCase().includes(term)) : props.mailboxes;
 });
 
-function toggle(model, id) {
-    model.value = model.value.includes(id) ? model.value.filter((x) => x !== id) : [...model.value, id];
+// In the template a ref is unwrapped to its value, so the toggles work on the refs here.
+function toggleDomain(id) {
+    domainIds.value = domainIds.value.includes(id) ? domainIds.value.filter((x) => x !== id) : [...domainIds.value, id];
+}
+
+function toggleMailbox(id) {
+    mailboxIds.value = mailboxIds.value.includes(id) ? mailboxIds.value.filter((x) => x !== id) : [...mailboxIds.value, id];
 }
 </script>
 
@@ -32,7 +37,7 @@ function toggle(model, id) {
             <Label>Domains <span class="font-normal text-muted-foreground">(full management)</span></Label>
             <div class="max-h-36 space-y-0.5 overflow-y-auto rounded-md border p-1">
                 <label v-for="domain in domains" :key="domain.id" class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent">
-                    <input type="checkbox" class="size-4 accent-primary" :checked="domainIds.includes(domain.id)" @change="toggle(domainIds, domain.id)" />
+                    <input type="checkbox" class="size-4 accent-primary" :checked="domainIds.includes(domain.id)" @change="toggleDomain(domain.id)" />
                     <span class="break-all">{{ domain.name }}</span>
                 </label>
                 <p v-if="! domains.length" class="px-2 py-1.5 text-sm text-muted-foreground">No domains yet.</p>
@@ -43,7 +48,7 @@ function toggle(model, id) {
             <Input v-model="search" placeholder="Search mailboxes..." class="h-8" />
             <div class="max-h-36 space-y-0.5 overflow-y-auto rounded-md border p-1">
                 <label v-for="mailbox in visibleMailboxes" :key="mailbox.id" class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent">
-                    <input type="checkbox" class="size-4 accent-primary" :checked="mailboxIds.includes(mailbox.id)" @change="toggle(mailboxIds, mailbox.id)" />
+                    <input type="checkbox" class="size-4 accent-primary" :checked="mailboxIds.includes(mailbox.id)" @change="toggleMailbox(mailbox.id)" />
                     <span class="break-all">{{ mailbox.email }}</span>
                 </label>
                 <p v-if="! visibleMailboxes.length" class="px-2 py-1.5 text-sm text-muted-foreground">No mailboxes found.</p>

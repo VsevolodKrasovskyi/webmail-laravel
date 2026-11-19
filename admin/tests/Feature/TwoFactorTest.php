@@ -15,8 +15,7 @@ class TwoFactorTest extends TestCase
 
     public function test_a_user_without_two_factor_works_normally(): void
     {
-        $user = User::factory()->create();
-        config(['auth.admin_emails' => [$user->email]]);
+        $user = User::factory()->admin()->create();
 
         foreach (['/dashboard', '/domains', '/mailboxes', '/aliases', '/users'] as $url) {
             $this->actingAs($user)->get($url)->assertOk();

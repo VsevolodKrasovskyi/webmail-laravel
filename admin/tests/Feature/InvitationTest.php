@@ -72,15 +72,13 @@ class InvitationTest extends TestCase
         $this->assertSame(0, Invitation::count());
     }
 
-    public function test_an_existing_user_and_an_admin_address_cannot_be_invited(): void
+    public function test_an_existing_user_cannot_be_invited(): void
     {
         $domain = $this->domain();
         User::factory()->create(['email' => 'here@example.com']);
         $this->actingAsAdmin();
-        config(['auth.admin_emails' => [...config('auth.admin_emails'), 'boss@example.com']]);
 
         $this->post('/invitations', ['email' => 'here@example.com', 'domain_ids' => [$domain->id]])->assertSessionHasErrors('email');
-        $this->post('/invitations', ['email' => 'boss@example.com', 'domain_ids' => [$domain->id]])->assertSessionHasErrors('email');
     }
 
     public function test_a_failed_send_keeps_the_invitation_and_says_so(): void
@@ -152,6 +150,7 @@ class InvitationTest extends TestCase
 
     public function test_an_invited_address_can_join_with_google_instead(): void
     {
+        User::factory()->admin()->create();
         $domain = $this->domain();
         Invitation::issue('new@example.com', ['domains' => [$domain->id]], null);
         $google = (new SocialiteUser)->map(['id' => 'g-9', 'name' => 'Newbie', 'email' => 'new@example.com', 'avatar' => null]);
@@ -164,6 +163,7 @@ class InvitationTest extends TestCase
 
         $user = User::firstWhere('email', 'new@example.com');
         $this->assertAuthenticatedAs($user);
+        $this->assertFalse($user->isAdmin());
         $this->assertSame([$domain->id], $user->domains()->pluck('domains.id')->all());
         $this->assertSame(0, Invitation::pending()->count());
     }
