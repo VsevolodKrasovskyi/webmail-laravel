@@ -3,18 +3,20 @@
 Self-hosted mail server with a web admin panel and webmail.
 
 - **Postfix** (SMTP), **Dovecot** (IMAP, LMTP, SASL) and **Rspamd** (antispam, DKIM signing) run in Docker.
-- **PostgreSQL** holds domains, mailboxes, aliases, password hashes and quotas. Postfix and Dovecot read it directly.
+- **PostgreSQL** holds domains, mailboxes, aliases, password hashes and quotas, and the panel's own users, invitations and API keys. Postfix and Dovecot read it directly.
 - **Admin panel** (Laravel 13, Vue 3, Inertia) runs on the host next to nginx and php-fpm. It manages the data above and includes webmail, drafts, scheduled sending and a dashboard with message counts.
 
 ## Features
 
 - Domains, mailboxes and aliases (including catch-all) with per-mailbox quota.
-- Automatic DKIM key generation per domain, optional DNS sync through Cloudflare.
+- Automatic DKIM key generation per domain, optional DNS sync through Cloudflare (several Cloudflare accounts, keys kept by administrators on the API keys page).
 - Webmail: threads, search, folders, drag and drop, Cc/Bcc, rich text, attachments, inline images, drafts with autosave, an "All mail" view (every folder and the scheduled queue, except Junk and Trash) and scheduled sending.
 - Admin shortcut that opens any mailbox's webmail without its password (Dovecot master user).
 - Dashboard with live message counts per mailbox and an unread notification, growth charts, setup health, scheduled sending stats and a domain report.
 - Sign-in with a password or with Google, optional two-factor authentication (authenticator app and recovery codes), e-mail verification and password reset.
 - The first user to register becomes the administrator (every domain and mailbox, user management). Other users join by invitation and get whole domains or single mailboxes. An administrator can make other users administrators.
+- A settings page for every user: name, password and two-factor authentication.
+- Install and update scripts for Debian and Ubuntu (`install.sh` with a guided dialog, `update.sh`).
 - Responsive layout for phones.
 
 ## Architecture
@@ -99,7 +101,18 @@ cd /opt/mailserver
 sudo ./install.sh --host mail.example.com --domain example.com --email you@example.com
 ```
 
-It installs Docker, PHP 8.4, Composer, Node.js, nginx and certbot, creates both `.env` files with random secrets, gets the certificate, starts the mail stack, builds the panel and adds the cron entry. Without options it asks for the values. It can be run again: existing `.env` files and secrets are kept, and it rebuilds and migrates, so `git pull && sudo ./install.sh ...` also updates a running install. At the end it prints the next steps (create the administrator, firewall, DNS records).
+It installs Docker, PHP 8.4, Composer, Node.js, nginx and certbot, creates both `.env` files with random secrets, gets the certificate, starts the mail stack, builds the panel and adds the cron entry. Without options it opens a guided dialog (whiptail, preinstalled on Debian and Ubuntu): a welcome screen, the host name, mail domain, Let's Encrypt e-mail, time zone and the sender of the system e-mail (default `noreply@your-domain`, a bare name such as `no-reply` gets the mail domain, `--from` sets it without the dialog, earlier values are pre-filled when you run it again), a summary with warnings (for example when the DNS record does not point at this server) and then five steps with a short progress line each. The details of every command go to `/var/log/mailserver-install.log`, and a failure shows the last lines of it. A final screen lists the next steps. With all options and `-y`, or in a script or CI, there is no dialog and no question (`--no-tui` gives plain command-line questions). It can be run again: existing `.env` files and secrets are kept. At the end it prints the next steps (create the administrator, firewall, DNS records).
+
+### Updating
+
+```bash
+cd /opt/mailserver
+sudo ./update.sh
+```
+
+`update.sh` needs no questions. It pulls the new code (`git pull --ff-only`, it stops if tracked files have local changes), backs up the database to `/var/backups/mailserver` (the last 10 are kept), rebuilds the mail containers, puts the panel in maintenance mode, runs `composer install`, the migrations and the frontend build, reloads php-fpm and switches the panel back on. If a step fails the panel is switched back on and the path of the backup is printed together with the restore command. The panel runs on the host, so it is updated here as well and not inside a container.
+
+Options: `--no-git` (use the code as it is), `--no-backup`, `--pull` (also pull newer images of Postgres, Redis and Rspamd, off by default so the database version is not upgraded on its own) and `--force` (rebuild even without new commits). It does not change the `.env` files, the nginx site or the certificate, use `./install.sh` again for those.
 
 The installer uses the official installers of Docker (get.docker.com), Node.js (NodeSource) and Composer, and the PHP packages of ondrej/sury. If you prefer to control that, follow the manual steps below.
 
@@ -127,6 +140,7 @@ cd admin
 cp .env.example .env
 # Set APP_URL, APP_DOMAIN, APP_ENV=production, APP_DEBUG=false, APP_TIMEZONE,
 # the same DB_* and DOVECOT_MASTER_PASSWORD as the root .env,
+# MAIL_MAILER=postfix and MAIL_FROM_ADDRESS (a mailbox you create in the panel),
 # and the GOOGLE_* values if you want Google sign-in.
 # Set SESSION_SECURE_COOKIE=true when served over HTTPS.
 
@@ -177,7 +191,7 @@ Only variables that differ from the framework defaults are in `admin/.env.exampl
 |---|---|
 | `APP_NAME` | Application name. |
 | `APP_ENV` | `local` or `production`. |
-| `APP_KEY` | Encrypts sessions and the webmail credentials kept in the session. Create it with `php artisan key:generate`. Changing it later logs everyone out. |
+| `APP_KEY` | Encrypts sessions and the webmail credentials kept in the session. Create it with `php artisan key:generate`. Back it up. Changing it later logs everyone out and makes the two-factor secrets and the saved Cloudflare tokens unreadable. |
 | `APP_DEBUG` | Detailed error pages. Must be `false` in production. |
 | `APP_URL` | Public URL of the panel. The Google redirect URI is built from it as `APP_URL/auth/google/callback`. |
 | `APP_TIMEZONE` | Time zone for dates in the UI. Default `UTC`. |
@@ -186,9 +200,8 @@ Only variables that differ from the framework defaults are in `admin/.env.exampl
 | `APP_DOMAIN` | Same as the root `.env`. Used as the MX target when syncing DNS. |
 | `DOVECOT_MASTER_PASSWORD` | Same as the root `.env`. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional. Google OAuth client, enables "Sign in with Google". Without it people sign in with e-mail and password. |
-| `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` | System e-mail (invitations, verification, password reset) goes through this stack's own Postfix. Use `MAIL_MAILER=postfix` and a `MAIL_FROM_ADDRESS` that is an existing mailbox, for example `noreply@example.com`. The panel signs in as that mailbox with the Dovecot master user, no mailbox password is stored. |
+| `MAIL_MAILER`, `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` | System e-mail (invitations, verification, password reset) goes through this stack's own Postfix. Use `MAIL_MAILER=postfix` and a `MAIL_FROM_ADDRESS` that is an existing mailbox, for example `noreply@example.com`. `install.sh` writes it (default `noreply@your-domain`), the mailbox itself is created by an administrator in the panel. The panel signs in as that mailbox with the Dovecot master user, no mailbox password is stored. |
 | `SESSION_SECURE_COOKIE` | `true` when the panel is served over HTTPS. With `false` on HTTPS or `true` on plain HTTP the login loops. |
-| `CLOUDFLARE_API_TOKEN` | Optional. Enables "Sync DNS" on the Domains page. |
 
 ### Optional overrides
 
@@ -198,7 +211,7 @@ These work without being set. Add them to `admin/.env` only to change the defaul
 |---|---|---|
 | `DKIM_KEYS_PATH` | `../docker/data/dkim` | Where DKIM private keys are written. Must be the host path mounted into rspamd. |
 | `MAIL_DEFAULT_QUOTA_MB` | `3072` | Quota suggested for new mailboxes. |
-| `IMAP_HOST`, `SMTP_HOST` | `127.0.0.1` | Where webmail connects (IMAP 993, SMTP 465). |
+| `IMAP_HOST`, `SMTP_HOST` | `127.0.0.1` | Where webmail connects (IMAP 993, SMTP 465). `SMTP_HOST` is also used for the system e-mail. |
 | `DOVECOT_MASTER_USER` | `admin` | Must match `docker/dovecot/master-users.template`. |
 | `SESSION_LIFETIME` | `120` | Minutes until an idle session expires. |
 | `LOG_LEVEL` | `debug` | Use `error` in production. Logs go to `storage/logs/laravel.log`. |
@@ -239,6 +252,8 @@ Everything else (sessions, cache and queue in the database, locale) uses Laravel
 
 The invited user gets a link valid for 7 days, sets a name and a password, then signs in. The link also confirms the e-mail address. An invited address can sign in with Google instead, if it is the same address. Domain and mailbox access can be changed later, and **Resend** issues a new link.
 
+**Settings.** Every user has a **Settings** page in the account menu: change the name, change the password (the current one is asked, a user who only signed in with Google sets a first password without it) and turn two-factor authentication on or off. Changing the e-mail address is not possible.
+
 **Locked out.** If a user with two-factor authentication loses the phone and the recovery codes, an administrator resets it on the Users page. If that is the only administrator, reset it from a console:
 
 ```bash
@@ -278,17 +293,15 @@ Port 143 exists but plaintext login is disabled, use 993. Port 25 is for server-
 
 ## TLS certificates
 
-Postfix and Dovecot read `/etc/letsencrypt/live/<APP_DOMAIN>/` from the host. After a renewal restart them, because they do not hot-reload certificates:
+Postfix and Dovecot read `/etc/letsencrypt/live/<APP_DOMAIN>/` from the host. After a renewal they have to be told, because they do not hot-reload certificates. `install.sh` adds a certbot deploy hook (`/etc/letsencrypt/renewal-hooks/deploy/mailserver.sh`) that does it. On a manual install put this command into a hook of your own:
 
 ```bash
 docker compose restart postfix dovecot
 ```
 
-A certbot deploy hook is a convenient place for this command.
-
 ## Cloudflare DNS sync (optional)
 
-If a domain's DNS is hosted on Cloudflare, the panel can publish its mail DNS records for you. Open **Domains**, click a domain, then **Sync DNS via Cloudflare**. Without a token the button is disabled and you set DNS by hand (see "Required DNS records").
+If a domain's DNS is hosted on Cloudflare, the panel can publish its mail DNS records for you. An administrator adds one or more Cloudflare API keys on the **API keys** page (one per Cloudflare account, so domains of several accounts work). Then, on **Domains**, click a domain and **Sync DNS via Cloudflare**: the panel looks for the domain's zone in the connected accounts, tries the one that served it last time first, and remembers the account. Without a key the button is disabled and you set DNS by hand (see "Required DNS records"). Any user who manages a domain can sync it, they never see the token.
 
 ### What it changes
 
@@ -319,19 +332,18 @@ Create a **custom API token**, not the Global API Key.
 
 3. Under **Zone Resources** choose **Include, Specific zone** and select only the domains this stack serves. Use "All zones" only if you really manage everything from here.
 4. Optional but recommended: restrict **Client IP Address Filtering** to your server's IP and set a TTL (expiry date) you will remember to renew.
-5. Create the token, copy it once and put it in `admin/.env`:
+5. Create the token and copy it once. In the panel open **API keys**, press **Add Cloudflare key**, enter a name and the token. The panel checks it with Cloudflare, tells how many zones it sees and stores it encrypted with `APP_KEY`. It is not shown again, only the last four characters. Nothing goes into `admin/.env`.
 
-   ```env
-   CLOUDFLARE_API_TOKEN=your-token
-   ```
-
-6. Reload the panel configuration (`php artisan config:clear`, or restart php-fpm if config is cached).
+Changing `APP_KEY` makes the stored tokens unreadable, add the keys again in that case. The **check** button on the API keys page tests a saved token, for example after it was revoked or expired.
 
 Only **Zone Read** plus **DNS Edit** are needed. Do not add Account, SSL, Firewall or Workers permissions. "DNS Read" alone is not enough because the panel writes records.
 
-### Verify the token
+### Verify the token by hand
+
+The API keys page checks a token when you add it. To check one from a console:
 
 ```bash
+export CLOUDFLARE_API_TOKEN=your-token
 curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
   https://api.cloudflare.com/client/v4/user/tokens/verify
 ```
@@ -348,9 +360,9 @@ The response must contain one item in `result`.
 ### Requirements and common errors
 
 - The domain must already be a zone in your Cloudflare account and the zone name must be exactly the mail domain. A mail domain like `mail.example.com` that lives inside the `example.com` zone is not found, because the lookup is by the exact name.
-- `No Cloudflare zone found for ...`: the zone is not in the account, the token is not scoped to it, or the token lacks **Zone Read**.
+- `No Cloudflare zone found for ... in N connected account(s)`: the zone is in none of the connected accounts, or the token is not scoped to it, or it lacks **Zone Read**. Errors of single accounts are listed after it.
 - `Authentication error` or HTTP 403: the token lacks **DNS Edit** for that zone, or it is expired or IP-restricted to a different address.
-- `Cloudflare is not configured`: `CLOUDFLARE_API_TOKEN` is empty in `admin/.env` or the config is cached.
+- `No Cloudflare API key is connected`: add a key on the API keys page (administrators only).
 - The request goes through the public Cloudflare v4 API but was not tested against a live account in this repository, so try one domain first.
 
 ## Time zone
@@ -364,13 +376,15 @@ Dates in the UI use `APP_TIMEZONE` from `admin/.env` (default `UTC`). The time p
 - Received HTML is sanitized in the browser with DOMPurify before it is shown. Scripts, `style` blocks, iframes, forms, SVG and MathML, event handlers and `javascript:` or `data:` links are removed. Inline styles stay (without `position` and `z-index`), links open in a new tab with `noopener noreferrer`, and the message is clipped to its own box. Remote images are still loaded, so a sender can see that a message was opened. Attachments are served as downloads with `nosniff`.
 - Webmail keeps the mailbox password only in an encrypted session value. Scheduled sending does not store passwords, it authenticates through the master user.
 - Sign-in is by password or Google. Passwords are hashed, sign-in and reset are rate limited, and two-factor authentication is available. Registration is open only until the first user exists, after that every account is created by an administrator's invitation.
+- Cloudflare API tokens are stored encrypted with `APP_KEY`, shown only as their last four characters and never sent to the browser. Two-factor secrets are encrypted the same way and recovery codes are stored as hashes. Invitation links hold a random token of which only a hash is stored.
+- Only administrators see the Users and API keys pages and can invite, delete or promote users. Other users see just their own domains and mailboxes.
 - The mail ports are open to the internet by design, so keep the host patched and consider fail2ban for Dovecot and Postfix.
 
 ## Notes and limitations
 
 - **Local testing**: rspamd trusts private addresses and skips most checks for them, so self-addressed test mail often lacks `X-Spam-*` and `Authentication-Results` headers.
 - **rspamd web UI** is not exposed. To use it, set a password with `docker compose exec rspamd rspamadm pw` and publish port 11334.
-- **Backups**: back up the `pgdata` and `vmail` volumes and `docker/data/dkim`. Losing the DKIM keys means new keys and new DNS records.
+- **Backups**: back up the `pgdata` and `vmail` volumes, `docker/data/dkim` and `admin/.env` (the `APP_KEY` in it). Losing the DKIM keys means new keys and new DNS records, losing `APP_KEY` means two-factor secrets and Cloudflare tokens have to be set up again. `update.sh` also dumps the database to `/var/backups/mailserver` before every update.
 - **Dashboard numbers**: domains, mailboxes, aliases, growth and scheduled mail come from the admin database. Message counts per mailbox are read from Dovecot over IMAP with the master user (one `STATUS` per folder, nothing is fetched or marked as read), cached for 60 seconds and refreshed every minute while the dashboard is open. Without `DOVECOT_MASTER_PASSWORD` they are not shown. "Inbox" and "Unread" count INBOX, "Total" counts every folder except Junk and Trash. Message traffic over time and real disk usage are not tracked.
 - Draft attachments are not stored with the draft.
 - The webmail is an admin convenience, not a self-service portal with its own accounts.

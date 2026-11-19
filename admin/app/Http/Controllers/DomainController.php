@@ -87,12 +87,7 @@ class DomainController extends Controller
         Gate::authorize('update', $domain);
 
         try {
-            $log = $this->cloudflare->syncMailRecords(
-                $domain->name,
-                config('mail_server.app_domain'),
-                $domain->dkim_selector,
-                $domain->dkim_public_key,
-            );
+            $log = $this->cloudflare->syncDomain($domain, config('mail_server.app_domain'));
         } catch (Throwable $e) {
             return back()->with('error', $e->getMessage());
         }

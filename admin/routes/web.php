@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AliasController;
+use App\Http\Controllers\ApiKeyController;
 use App\Http\Controllers\Auth\AcceptInvitationController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\EmailVerificationController;
@@ -78,6 +79,10 @@ Route::middleware(['auth', 'verified', 'two-factor'])->group(function () {
     Route::middleware('admin')->group(function () {
         Route::get('/users', [UserController::class, 'index'])->name('users.index');
         Route::put('/users/{user}', [UserController::class, 'update'])->name('users.update');
+        Route::get('/api-keys', [ApiKeyController::class, 'index'])->name('api-keys.index');
+        Route::post('/api-keys', [ApiKeyController::class, 'store'])->name('api-keys.store');
+        Route::post('/api-keys/{apiKey}/test', [ApiKeyController::class, 'test'])->name('api-keys.test');
+        Route::delete('/api-keys/{apiKey}', [ApiKeyController::class, 'destroy'])->name('api-keys.destroy');
         Route::put('/users/{user}/admin', [UserController::class, 'setAdmin'])->name('users.admin');
         Route::post('/users/{user}/two-factor-reset', [UserController::class, 'resetTwoFactor'])->name('users.two-factor-reset');
         Route::delete('/users/{user}', [UserController::class, 'destroy'])->name('users.destroy');

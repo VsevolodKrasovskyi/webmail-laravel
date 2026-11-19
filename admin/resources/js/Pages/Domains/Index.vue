@@ -1,5 +1,6 @@
 <script setup>
-import { Head } from '@inertiajs/vue3';
+import { Head, Link } from '@inertiajs/vue3';
+import ApiKeyController from '@/actions/App/Http/Controllers/ApiKeyController';
 import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import { ref, watch } from 'vue';
 import { useForm, router, usePage } from '@inertiajs/vue3';
@@ -264,7 +265,10 @@ function syncDns(domain) {
                 </div>
                 <DialogFooter class="sm:justify-between sm:items-center">
                     <p v-if="! cloudflareEnabled" class="text-xs text-muted-foreground">
-                        Set CLOUDFLARE_API_TOKEN to sync these records automatically.
+                        <template v-if="page.props.auth.user.is_admin">
+                            Add a Cloudflare key on the <Link :href="ApiKeyController.index.url()" class="underline underline-offset-4">API keys</Link> page to sync these records automatically.
+                        </template>
+                        <template v-else>Ask an administrator to connect Cloudflare to sync these records automatically.</template>
                     </p>
                     <span v-else />
                     <Button :disabled="! cloudflareEnabled || syncing" @click="syncDns(dnsDomain)">

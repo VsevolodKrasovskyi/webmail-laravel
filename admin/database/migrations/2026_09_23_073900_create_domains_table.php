@@ -14,6 +14,8 @@ return new class extends Migration
             $table->boolean('is_active')->default(true);
             $table->text('dkim_selector')->nullable();
             $table->text('dkim_public_key')->nullable();
+            // The Cloudflare account that last synced this domain, tried first next time.
+            $table->foreignId('api_key_id')->nullable()->constrained('api_keys')->nullOnDelete();
             $table->timestamps();
         });
     }

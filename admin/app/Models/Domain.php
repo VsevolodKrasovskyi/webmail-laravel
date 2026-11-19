@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Domain extends Model
@@ -29,6 +30,11 @@ class Domain extends Model
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
         return $user->isAdmin() ? $query : $query->whereIn('domains.id', $user->managedDomainIds());
+    }
+
+    public function apiKey(): BelongsTo
+    {
+        return $this->belongsTo(ApiKey::class);
     }
 
     public function mailboxes(): HasMany

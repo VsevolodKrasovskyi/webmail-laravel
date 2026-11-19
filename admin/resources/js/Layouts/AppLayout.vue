@@ -4,6 +4,7 @@ import DashboardController from '@/actions/App/Http/Controllers/DashboardControl
 import DomainController from '@/actions/App/Http/Controllers/DomainController';
 import MailboxController from '@/actions/App/Http/Controllers/MailboxController';
 import AliasController from '@/actions/App/Http/Controllers/AliasController';
+import ApiKeyController from '@/actions/App/Http/Controllers/ApiKeyController';
 import SettingsController from '@/actions/App/Http/Controllers/SettingsController';
 import UserController from '@/actions/App/Http/Controllers/UserController';
 import WebmailController from '@/actions/App/Http/Controllers/WebmailController';
@@ -17,6 +18,7 @@ import {
     ArrowRightLeftIcon,
     UsersIcon,
     SettingsIcon,
+    KeyRoundIcon,
     LogOutIcon,
 } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
@@ -40,6 +42,7 @@ const nav = computed(() => {
         { href: MailboxController.index.url(), also: [WebmailController.index.url()], label: 'Mailboxes', icon: MailIcon },
         ...(user?.manages_domains ? [{ href: AliasController.index.url(), label: 'Aliases', icon: ArrowRightLeftIcon }] : []),
         ...(user?.is_admin ? [{ href: UserController.index.url(), label: 'Users', icon: UsersIcon }] : []),
+        ...(user?.is_admin ? [{ href: ApiKeyController.index.url(), label: 'API keys', icon: KeyRoundIcon }] : []),
     ];
 });
 

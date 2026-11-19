@@ -11,8 +11,6 @@ class CloudflareServiceTest extends TestCase
 {
     private function sync(array $recordsByKey): array
     {
-        config(['services.cloudflare.api_token' => 'token']);
-
         Http::fake(function (Request $request) use ($recordsByKey) {
             $path = parse_url($request->url(), PHP_URL_PATH);
 
@@ -29,7 +27,7 @@ class CloudflareServiceTest extends TestCase
             return Http::response(['result' => ['id' => 'x']]);
         });
 
-        return (new CloudflareService())->syncMailRecords('example.com', 'mail.host.test', 'mail', 'PUBKEY');
+        return (new CloudflareService)->using('token')->syncMailRecords('example.com', 'mail.host.test', 'mail', 'PUBKEY');
     }
 
     private function writes(): array

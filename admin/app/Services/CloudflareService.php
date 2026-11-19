@@ -2,6 +2,9 @@
 
 namespace App\Services;
 
+use App\Models\ApiKey;
+use App\Models\Domain;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -9,9 +12,86 @@ class CloudflareService
 {
     private const BASE_URL = 'https://api.cloudflare.com/client/v4';
 
+    /** The token of the Cloudflare account this instance talks to, see using(). */
+    private ?string $token = null;
+
+    /** A copy of the service that talks to the account of this token. */
+    public function using(string $token): static
+    {
+        $copy = clone $this;
+        $copy->token = $token;
+
+        return $copy;
+    }
+
+    /** True when an administrator added at least one Cloudflare API key. */
     public function isConfigured(): bool
     {
-        return filled(config('services.cloudflare.api_token'));
+        return ApiKey::cloudflare()->exists();
+    }
+
+    /**
+     * Check a token and return how many zones it can see.
+     *
+     * @throws RuntimeException with Cloudflare's own message when the token is refused
+     */
+    public function verify(string $token): int
+    {
+        $response = $this->using($token)->client()->get('/zones', ['per_page' => 1]);
+
+        if (! $response->successful()) {
+            throw new RuntimeException($response->json('errors.0.message') ?: "Cloudflare answered HTTP {$response->status()}.");
+        }
+
+        return (int) $response->json('result_info.total_count', count($response->json('result', [])));
+    }
+
+    /**
+     * Sync one domain with whichever connected Cloudflare account holds its zone. The account that
+     * served the domain last time is tried first, then the others. Never creates zones.
+     *
+     * @return array<int, string> one human-readable line per record
+     */
+    public function syncDomain(Domain $domain, string $mailHostname): array
+    {
+        $keys = ApiKey::cloudflare()->orderBy('id')->get();
+
+        if ($keys->isEmpty()) {
+            throw new RuntimeException('No Cloudflare API key is connected. An administrator adds one on the API keys page.');
+        }
+
+        $keys = $keys->sortByDesc(fn (ApiKey $key) => $key->id === $domain->api_key_id)->values();
+        $problems = [];
+
+        foreach ($keys as $key) {
+            $service = $this->using($key->token);
+
+            try {
+                $zoneId = $service->findZoneId($domain->name);
+            } catch (RequestException $e) {
+                $problems[] = "{$key->name}: ".($e->response->json('errors.0.message') ?: 'HTTP '.$e->response->status()).'.';
+
+                continue;
+            }
+
+            if (! $zoneId) {
+                continue;
+            }
+
+            $log = $service->syncZone($zoneId, $domain->name, $mailHostname, $domain->dkim_selector, $domain->dkim_public_key);
+
+            $key->forceFill(['last_used_at' => now()])->save();
+            if ($domain->api_key_id !== $key->id) {
+                $domain->forceFill(['api_key_id' => $key->id])->save();
+            }
+
+            return ["Cloudflare account: {$key->name}", ...$log];
+        }
+
+        throw new RuntimeException(
+            "No Cloudflare zone found for {$domain->name} in ".$keys->count().' connected account(s). Add the domain to Cloudflare first.'
+            .($problems ? ' '.implode(' ', $problems) : '')
+        );
     }
 
     /**
@@ -63,7 +143,7 @@ class CloudflareService
      *  - if none exists: created next to whatever else is there.
      *
      * @param  callable(array): bool  $ownedBy
-     * @return array{0: string, 1: array<int, array>}  action, other records of the same type+name
+     * @return array{0: string, 1: array<int, array>} action, other records of the same type+name
      */
     public function ensureRecord(string $zoneId, array $record, callable $ownedBy, bool $overwrite): array
     {
@@ -103,16 +183,18 @@ class CloudflareService
      */
     public function syncMailRecords(string $domain, string $mailHostname, string $dkimSelector, string $dkimPublicKey): array
     {
-        if (! $this->isConfigured()) {
-            throw new RuntimeException('Cloudflare is not configured: set CLOUDFLARE_API_TOKEN.');
-        }
-
         $zoneId = $this->findZoneId($domain);
 
         if (! $zoneId) {
             throw new RuntimeException("No Cloudflare zone found for {$domain}. Add it to your Cloudflare account first.");
         }
 
+        return $this->syncZone($zoneId, $domain, $mailHostname, $dkimSelector, $dkimPublicKey);
+    }
+
+    /** @return array<int, string> one human-readable line per record */
+    public function syncZone(string $zoneId, string $domain, string $mailHostname, string $dkimSelector, string $dkimPublicKey): array
+    {
         $log = [];
         $host = rtrim(strtolower($mailHostname), '.');
         $startsWith = fn (string $prefix) => fn (array $r) => str_starts_with($this->normalize($r['content']), $prefix);
@@ -150,7 +232,11 @@ class CloudflareService
 
     private function client()
     {
-        return Http::withToken(config('services.cloudflare.api_token'))
+        if (blank($this->token)) {
+            throw new RuntimeException('No Cloudflare API key is set.');
+        }
+
+        return Http::withToken($this->token)
             ->baseUrl(self::BASE_URL)
             ->acceptJson();
     }
