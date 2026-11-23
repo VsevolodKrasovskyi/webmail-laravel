@@ -27,6 +27,9 @@ class WebmailService
     /** Left out of "All mail". */
     private const EXCLUDED_FROM_ALL = ['Junk', 'Trash'];
 
+    /** Messages the user wrote are never unread, whatever the IMAP flags say. */
+    private const OWN_FOLDERS = ['Sent', 'Drafts'];
+
     private const MAX_INLINE_IMAGE_BYTES = 3 * 1024 * 1024;
 
     private const MAX_INLINE_TOTAL_BYTES = 8 * 1024 * 1024;
@@ -78,7 +81,7 @@ class WebmailService
                     'to' => $this->decodeHeader((string) $message->to),
                     'date' => $message->date?->toDate()?->format('d.m.Y H:i'),
                     'timestamp' => (int) $message->date?->toDate()?->getTimestamp(),
-                    'seen' => $message->hasFlag('Seen'),
+                    'seen' => in_array($path, self::OWN_FOLDERS, true) || $message->hasFlag('Seen'),
                     'thread_key' => (string) ($message->references->first() ?: ($message->in_reply_to->first() ?: $message->message_id)),
                 ];
             }
@@ -121,7 +124,7 @@ class WebmailService
                     'date' => $m->date?->toDate()?->format('d.m.Y H:i'),
                     'body' => $body,
                     'message_id' => (string) $m->message_id,
-                    'seen' => $m->hasFlag('Seen'),
+                    'seen' => in_array($m->getFolder()?->path, self::OWN_FOLDERS, true) || $m->hasFlag('Seen'),
                     // Images already shown inside the body are not listed again.
                     'attachments' => $m->getAttachments()
                         ->reject(fn ($a) => in_array($a->id, $inlineIds, true))
