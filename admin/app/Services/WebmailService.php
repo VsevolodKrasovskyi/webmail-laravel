@@ -591,9 +591,11 @@ class WebmailService
             $mime->attach(base64_decode($attachment['content']), $attachment['name'], $attachment['contentType']);
         }
 
-        $transport->send($mime);
+        // Symfony generates Message-ID and Date on every build of the message, so the copy for Sent
+        // must be the message that was actually sent, or replies would point to an ID that is not in Sent.
+        $sent = $transport->send($mime);
 
-        $this->appendToSent($email, $password, $mime->toString(), $authUser);
+        $this->appendToSent($email, $password, $sent->toString(), $authUser);
 
         if (filled($draftId)) {
             $this->deleteDraft($email, $password, $draftId, $authUser);
