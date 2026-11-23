@@ -673,7 +673,7 @@ onMounted(() => {
                                         </span>
                                     </div>
                                     <div class="flex shrink-0 gap-1">
-                                        <Button variant="ghost" size="icon-sm" title="Mark as unread" @click="markUnread(m.uid, m.folder)">
+                                        <Button v-if="! OUTGOING.includes(m.folder)" variant="ghost" size="icon-sm" title="Mark as unread" @click="markUnread(m.uid, m.folder)">
                                             <MailIcon class="size-4" />
                                         </Button>
                                     </div>
