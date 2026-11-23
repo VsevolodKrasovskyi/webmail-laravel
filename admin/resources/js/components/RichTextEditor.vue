@@ -33,13 +33,102 @@ async function insertImageFiles(files) {
     }
 }
 
+// Image with an adjustable width; the width goes into the HTML so it survives sending.
+const ResizableImage = Image.extend({
+    addNodeView() {
+        return ({ node: initialNode, editor: ed, getPos }) => {
+            let node = initialNode;
+
+            const dom = document.createElement('span');
+            dom.className = 'rte-img';
+
+            const img = document.createElement('img');
+            const label = document.createElement('span');
+            label.className = 'rte-img-label';
+            dom.append(img, label);
+
+            const render = () => {
+                img.src = node.attrs.src;
+                img.alt = node.attrs.alt ?? '';
+                img.style.width = node.attrs.width ? `${node.attrs.width}px` : '';
+            };
+            render();
+
+            // Corner handles: dragging keeps the aspect ratio, the width is saved on release.
+            ['nw', 'ne', 'sw', 'se'].forEach((corner) => {
+                const handle = document.createElement('span');
+                handle.className = `rte-img-handle rte-img-handle-${corner}`;
+                handle.addEventListener('pointerdown', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handle.setPointerCapture(event.pointerId);
+
+                    const startX = event.clientX;
+                    const startWidth = img.getBoundingClientRect().width;
+                    const direction = corner.includes('w') ? -1 : 1;
+                    let width = startWidth;
+
+                    const showLabel = () => {
+                        const rect = img.getBoundingClientRect();
+                        label.textContent = `${Math.round(rect.width)} x ${Math.round(rect.height)}`;
+                    };
+
+                    const onMove = (e) => {
+                        width = Math.max(30, startWidth + direction * (e.clientX - startX));
+                        img.style.width = `${Math.round(width)}px`;
+                        showLabel();
+                    };
+
+                    const onUp = () => {
+                        handle.removeEventListener('pointermove', onMove);
+                        handle.removeEventListener('pointerup', onUp);
+                        label.textContent = '';
+                        const pos = getPos();
+                        if (typeof pos !== 'number') return;
+                        ed.view.dispatch(ed.view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, width: Math.round(width) }));
+                    };
+
+                    handle.addEventListener('pointermove', onMove);
+                    handle.addEventListener('pointerup', onUp);
+                    showLabel();
+                });
+                dom.append(handle);
+            });
+
+            return {
+                dom,
+                update(updated) {
+                    if (updated.type !== node.type) return false;
+                    node = updated;
+                    render();
+                    return true;
+                },
+                stopEvent: (event) => event.target instanceof HTMLElement && event.target.classList.contains('rte-img-handle'),
+                ignoreMutation: () => true,
+            };
+        };
+    },
+    addAttributes() {
+        return {
+            ...this.parent?.(),
+            width: {
+                default: null,
+                parseHTML: (el) => el.getAttribute('width') || el.style.width?.replace('px', '') || null,
+                renderHTML: (attrs) => (attrs.width
+                    ? { width: attrs.width, style: `width:${attrs.width}px;height:auto;max-width:100%` }
+                    : { style: 'max-width:100%;height:auto' }),
+            },
+        };
+    },
+});
+
 const editor = useEditor({
     content: props.modelValue,
     extensions: [
         StarterKit,
         Underline,
         Link.configure({ openOnClick: false }),
-        Image,
+        ResizableImage,
     ],
     editorProps: {
         attributes: {
@@ -126,3 +215,58 @@ onBeforeUnmount(() => {
         <EditorContent :editor="editor" class="bg-white" />
     </div>
 </template>
+
+<style>
+.rte-img {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    line-height: 0;
+}
+
+.rte-img img {
+    max-width: 100%;
+    height: auto;
+}
+
+.rte-img.ProseMirror-selectednode img {
+    outline: 1.5px solid #4f46e5;
+}
+
+.rte-img-handle {
+    display: none;
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    border: 1.5px solid #4f46e5;
+    border-radius: 50%;
+    background: #fff;
+    touch-action: none;
+}
+
+.rte-img.ProseMirror-selectednode .rte-img-handle {
+    display: block;
+}
+
+.rte-img-handle-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.rte-img-handle-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.rte-img-handle-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+.rte-img-handle-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+
+.rte-img-label {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.75);
+    padding: 1px 5px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: #fff;
+    pointer-events: none;
+}
+
+.rte-img-label:empty {
+    display: none;
+}
+</style>

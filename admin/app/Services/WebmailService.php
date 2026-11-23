@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport;
 use Symfony\Component\Mime\Email as MimeEmail;
+use Symfony\Component\Mime\Part\DataPart;
 use Webklex\PHPIMAP\Client as ImapClient;
 use Webklex\PHPIMAP\ClientManager;
 use Webklex\PHPIMAP\EncodingAliases;
@@ -190,7 +191,8 @@ class WebmailService
     ): string {
         $draftId = $draftId ?: bin2hex(random_bytes(12)).'@'.(substr(strrchr($email, '@'), 1) ?: 'localhost');
 
-        $mime = (new MimeEmail())->from($email)->subject($subject)->html($body);
+        $mime = (new MimeEmail())->from($email)->subject($subject);
+        $mime->html($this->embedDataImages($mime, $body));
 
         if (filled($to)) {
             $mime->to($to);
@@ -504,6 +506,38 @@ class WebmailService
     }
 
     /**
+     * Mail clients block data: URIs in <img>, so pasted images are attached as inline
+     * parts and the HTML points to them with cid:. Returns the rewritten HTML.
+     */
+    private function embedDataImages(MimeEmail $mime, string $html): string
+    {
+        $parts = [];
+
+        return preg_replace_callback(
+            '/(<img\b[^>]*?\ssrc=)(["\'])data:(image\/[a-z0-9.+-]+);base64,([^"\']+)\2/i',
+            function (array $m) use ($mime, &$parts) {
+                $binary = base64_decode($m[4], true);
+
+                if ($binary === false) {
+                    return $m[0];
+                }
+
+                $key = md5($binary);
+
+                if (! isset($parts[$key])) {
+                    $extension = explode('/', strtolower($m[3]))[1];
+                    $part = new DataPart($binary, 'image-'.(count($parts) + 1).'.'.explode('+', $extension)[0], strtolower($m[3]));
+                    $mime->addPart($part->asInline());
+                    $parts[$key] = $part->getContentId();
+                }
+
+                return $m[1].$m[2].'cid:'.$parts[$key].$m[2];
+            },
+            $html,
+        ) ?? $html;
+    }
+
+    /**
      * @param  array<int, string>  $cc
      * @param  array<int, array{name:string, contentType:string, content:string}>  $attachments  $content is base64-encoded
      */
@@ -535,8 +569,9 @@ class WebmailService
             ->from($email)
             ->to($to)
             ->subject($subject)
-            ->html($body)
             ->text(trim(strip_tags(preg_replace('/<(br|\/p|\/div)\b[^>]*>/i', "\n", $body))));
+
+        $mime->html($this->embedDataImages($mime, $body));
 
         if (! empty($cc)) {
             $mime->cc(...$cc);
