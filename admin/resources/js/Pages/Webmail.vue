@@ -108,6 +108,19 @@ async function loadFolders() {
     }
 }
 
+// Reloads only the unread counters, a failure here is not worth a toast.
+async function refreshFolders() {
+    try {
+        const data = await fetchJson(WebmailController.folders());
+        if (data.folders.length) folders.value = data.folders;
+    } catch {
+        // keep the previous counters
+    }
+}
+
+// Shown next to the folder name, capped so the sidebar layout does not break.
+const unreadLabel = (count) => (count > 9 ? '9+' : String(count));
+
 function selectFolder(path) {
     currentFolder.value = path;
     thread.value = null;
@@ -293,6 +306,7 @@ async function loadMessages() {
         }
         const data = await fetchJson(WebmailController.messages({ query }));
         messages.value = data.messages;
+        if (! search.value) refreshFolders();
     } catch (e) {
         toast.error(e.message);
     } finally {
@@ -338,6 +352,7 @@ async function openThread(item) {
                 m.seen = true;
             }
         }
+        refreshFolders();
     } catch (e) {
         toast.error(e.message);
     } finally {
@@ -354,6 +369,7 @@ async function markUnread(uid, folder) {
             }
         }
         thread.value = null;
+        refreshFolders();
     } catch (e) {
         toast.error(e.message);
     }
@@ -489,7 +505,7 @@ onMounted(() => {
                         <button
                             @click="selectFolder(folder.name)"
                             :title="folder.name === '__ALL__' ? 'All mail: inbox, sent, drafts, your folders and scheduled messages (not Junk or Trash)' : folder.label"
-                            class="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left text-sm"
+                            class="relative flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left text-sm"
                             :class="[
                                 currentFolder === folder.name ? 'font-medium text-primary' : 'text-foreground/80',
                                 sidebarCollapsed ? 'lg:justify-center lg:px-0' : '',
@@ -497,6 +513,12 @@ onMounted(() => {
                         >
                             <component :is="folderIcon(folder.name)" class="size-4 shrink-0" />
                             <span class="truncate" :class="{ 'lg:hidden': sidebarCollapsed }">{{ folder.label }}</span>
+                            <span
+                                v-if="folder.unread > 0"
+                                class="shrink-0 rounded-full bg-primary px-1.5 text-[10px] font-medium leading-4 text-primary-foreground"
+                                :class="sidebarCollapsed ? 'lg:absolute lg:right-1 lg:top-0.5 lg:ml-0' : 'ml-auto'"
+                                :title="`${folder.unread} unread`"
+                            >{{ unreadLabel(folder.unread) }}</span>
                         </button>
                         <button
                             v-if="! folder.standard && ! sidebarCollapsed"

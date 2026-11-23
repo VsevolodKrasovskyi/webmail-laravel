@@ -422,13 +422,28 @@ class WebmailService
             }
         }
 
+        // Unread counters. Sent and Drafts are the user's own messages, Trash is not worth counting.
+        $unread = [];
+
+        foreach ($existing as $path) {
+            if (in_array($path, [...self::OWN_FOLDERS, 'Trash'], true)) {
+                continue;
+            }
+
+            try {
+                $unread[$path] = (int) ($client->getConnection()->folderStatus($path, ['UNSEEN'])->validatedData()['unseen'] ?? 0);
+            } catch (\Throwable) {
+                // not selectable (e.g. a container folder)
+            }
+        }
+
         $client->disconnect();
 
         $standard = array_values(array_intersect(self::STANDARD_FOLDERS, $existing));
         $extra = array_values(array_diff($existing, self::STANDARD_FOLDERS));
         $ordered = [...$standard, ...$extra];
 
-        $folders = array_map(function ($path) {
+        $folders = array_map(function ($path) use ($unread) {
             $name = in_array($path, self::STANDARD_FOLDERS, true)
                 ? $path
                 : (string) EncodingAliases::convert($path, 'UTF7-IMAP', 'UTF-8');
@@ -437,6 +452,7 @@ class WebmailService
                 'name' => $name,
                 'label' => $name === 'INBOX' ? 'Inbox' : $name,
                 'standard' => in_array($path, self::STANDARD_FOLDERS, true),
+                'unread' => $unread[$path] ?? 0,
             ];
         }, $ordered);
 
@@ -450,7 +466,10 @@ class WebmailService
 
         $folders = $insertAfter($folders, 'Drafts', ['name' => self::SCHEDULED, 'label' => 'Scheduled', 'standard' => true, 'virtual' => true]);
 
-        return [['name' => self::ALL_MAIL, 'label' => 'All mail', 'standard' => true, 'virtual' => true], ...$folders];
+        // All mail covers every folder except Junk and Trash.
+        $allUnread = array_sum(array_diff_key($unread, array_flip(self::EXCLUDED_FROM_ALL)));
+
+        return [['name' => self::ALL_MAIL, 'label' => 'All mail', 'standard' => true, 'virtual' => true, 'unread' => $allUnread], ...$folders];
     }
 
     public function createFolder(string $email, string $password, string $name, ?string $authUser = null): void
